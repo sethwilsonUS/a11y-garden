@@ -1,0 +1,439 @@
+@import "tailwindcss";
+
+/* ========================================
+   A11y Garden — Global Theme
+   A calm, garden-inspired design system
+   supporting light & dark modes.
+   All color combos pass WCAG AA.
+   ======================================== */
+
+:root {
+  /* Typography */
+  --font-display: "Fraunces", serif;
+  --font-body: "DM Sans", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+
+  /* ---- Light Theme ---- */
+  --bg-primary: #f7f6f3;
+  --bg-secondary: #efede8;
+  --bg-tertiary: #e5e2db;
+  --bg-nav: rgba(247, 246, 243, 0.88);
+  --text-primary: #1a1a1a;
+  --text-secondary: #4b5441;
+  --text-muted: #516247;
+  --border-color: #d4d1c7;
+
+  /* Accent — emerald */
+  --accent: #047857;
+  --accent-hover: #065f46;
+  --accent-bg: rgba(4, 120, 87, 0.08);
+  --accent-border: rgba(4, 120, 87, 0.25);
+  --accent-glow: rgba(4, 120, 87, 0.10);
+
+  /* Button surfaces */
+  --btn-primary-bg: #047857;
+  --btn-primary-hover: #065f46;
+  --btn-primary-text: #ffffff;
+
+  /* Severity — tuned for light backgrounds */
+  --severity-critical: #dc2626;
+  --severity-critical-bg: rgba(220, 38, 38, 0.08);
+  --severity-critical-border: rgba(220, 38, 38, 0.25);
+  --severity-serious: #c2410c;
+  --severity-serious-bg: rgba(194, 65, 12, 0.08);
+  --severity-serious-border: rgba(194, 65, 12, 0.25);
+  --severity-moderate: #a16207;
+  --severity-moderate-bg: rgba(161, 98, 7, 0.08);
+  --severity-moderate-border: rgba(161, 98, 7, 0.25);
+  --severity-minor: #1d4ed8;
+  --severity-minor-bg: rgba(29, 78, 216, 0.08);
+  --severity-minor-border: rgba(29, 78, 216, 0.25);
+
+  /* Grade colors — light */
+  --grade-a: #047857;
+  --grade-b: #1d4ed8;
+  --grade-c: #a16207;
+  --grade-d: #c2410c;
+  --grade-f: #dc2626;
+
+  /* Surfaces */
+  --scrollbar-track: #e5e2db;
+  --scrollbar-thumb: #b5b0a6;
+  --scrollbar-thumb-hover: #8a847a;
+  --skeleton-base: #e5e2db;
+  --skeleton-shine: #efede8;
+  --pattern-color: rgba(4, 120, 87, 0.06);
+  --leaf-pattern-opacity: 0.04;
+
+  /* Gradients */
+  --gradient-page-1: #f7f6f3;
+  --gradient-page-2: #efede8;
+  --gradient-page-3: #f7f6f3;
+  --gradient-page-4: #e6f0e8;
+}
+
+.dark {
+  /* ---- Dark Theme ---- */
+  --bg-primary: #171717;
+  --bg-secondary: #1e1e1e;
+  --bg-tertiary: #2a2a2a;
+  --bg-nav: rgba(23, 23, 23, 0.88);
+  --text-primary: #f0ede6;
+  --text-secondary: #a8b89e;
+  --text-muted: #909f86;
+  --border-color: #2f2f2f;
+
+  /* Accent — tuned emerald for dark */
+  --accent: #34d399;
+  --accent-hover: #6ee7b7;
+  --accent-bg: rgba(52, 211, 153, 0.10);
+  --accent-border: rgba(52, 211, 153, 0.20);
+  --accent-glow: rgba(52, 211, 153, 0.12);
+
+  /* Button surfaces */
+  --btn-primary-bg: #059669;
+  --btn-primary-hover: #047857;
+  --btn-primary-text: #ffffff;
+
+  /* Severity — tuned for dark backgrounds */
+  --severity-critical: #ef4444;
+  --severity-critical-bg: rgba(239, 68, 68, 0.12);
+  --severity-critical-border: rgba(239, 68, 68, 0.25);
+  --severity-serious: #f97316;
+  --severity-serious-bg: rgba(249, 115, 22, 0.12);
+  --severity-serious-border: rgba(249, 115, 22, 0.25);
+  --severity-moderate: #eab308;
+  --severity-moderate-bg: rgba(234, 179, 8, 0.12);
+  --severity-moderate-border: rgba(234, 179, 8, 0.25);
+  --severity-minor: #3b82f6;
+  --severity-minor-bg: rgba(59, 130, 246, 0.12);
+  --severity-minor-border: rgba(59, 130, 246, 0.25);
+
+  /* Grade colors — dark */
+  --grade-a: #34d399;
+  --grade-b: #60a5fa;
+  --grade-c: #fbbf24;
+  --grade-d: #fb923c;
+  --grade-f: #f87171;
+
+  /* Surfaces */
+  --scrollbar-track: #1e1e1e;
+  --scrollbar-thumb: #3a3a3a;
+  --scrollbar-thumb-hover: #4a4a4a;
+  --skeleton-base: #1e1e1e;
+  --skeleton-shine: #2a2a2a;
+  --pattern-color: rgba(52, 211, 153, 0.04);
+  --leaf-pattern-opacity: 0.03;
+
+  /* Gradients */
+  --gradient-page-1: #171717;
+  --gradient-page-2: #1e1e1e;
+  --gradient-page-3: #171717;
+  --gradient-page-4: #172320;
+}
+
+/* ========================================
+   Base Styles
+   ======================================== */
+
+body {
+  font-family: var(--font-body), system-ui, sans-serif;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  transition: background-color 0.3s ease, color 0.3s ease;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1, h2, h3, h4, h5, h6,
+.font-display {
+  font-family: var(--font-display), serif;
+}
+
+code, pre, .font-mono {
+  font-family: var(--font-mono), monospace;
+}
+
+/* ========================================
+   Scrollbar
+   ======================================== */
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scrollbar-thumb-hover);
+}
+
+/* ========================================
+   Accessibility — Focus & Skip Link
+   ======================================== */
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.skip-link {
+  position: absolute;
+  top: -100%;
+  left: 16px;
+  padding: 12px 24px;
+  background: var(--btn-primary-bg);
+  color: var(--btn-primary-text);
+  text-decoration: none;
+  z-index: 100;
+  border-radius: 0 0 8px 8px;
+  font-weight: 600;
+  font-size: 0.875rem;
+  transition: top 0.2s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.skip-link:focus {
+  top: 0;
+}
+
+/* ========================================
+   Screen Reader Utility
+   ======================================== */
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+/* ========================================
+   Animated Gradient Background
+   ======================================== */
+
+.animated-gradient {
+  background: linear-gradient(
+    -45deg,
+    var(--gradient-page-1),
+    var(--gradient-page-2),
+    var(--gradient-page-3),
+    var(--gradient-page-4)
+  );
+  background-size: 400% 400%;
+  animation: gradient 20s ease infinite;
+}
+
+@keyframes gradient {
+  0%   { background-position: 0% 50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* ========================================
+   Garden Leaf Pattern (replaces dots)
+   Subtle organic shapes for texture
+   ======================================== */
+
+.pattern-leaves {
+  background-image:
+    radial-gradient(ellipse 8px 12px at 12px 12px, var(--pattern-color) 0%, transparent 70%),
+    radial-gradient(ellipse 6px 10px at 36px 28px, var(--pattern-color) 0%, transparent 70%),
+    radial-gradient(ellipse 7px 11px at 24px 44px, var(--pattern-color) 0%, transparent 70%);
+  background-size: 48px 56px;
+}
+
+/* Fallback dots pattern (simpler, still themed) */
+.pattern-dots {
+  background-image: radial-gradient(
+    circle,
+    var(--pattern-color) 1px,
+    transparent 1px
+  );
+  background-size: 20px 20px;
+}
+
+/* ========================================
+   Glow & Shadow Effects
+   ======================================== */
+
+.glow-accent {
+  box-shadow: 0 0 40px var(--accent-glow);
+}
+
+/* ========================================
+   Skeleton Loading
+   ======================================== */
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--skeleton-base) 25%,
+    var(--skeleton-shine) 50%,
+    var(--skeleton-base) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* ========================================
+   Theme-Aware Utility Classes
+   ======================================== */
+
+/* Backgrounds */
+.bg-theme-primary   { background-color: var(--bg-primary); }
+.bg-theme-secondary  { background-color: var(--bg-secondary); }
+.bg-theme-tertiary   { background-color: var(--bg-tertiary); }
+.bg-theme-nav        { background-color: var(--bg-nav); }
+
+/* Text */
+.text-theme-primary   { color: var(--text-primary); }
+.text-theme-secondary { color: var(--text-secondary); }
+.text-theme-muted     { color: var(--text-muted); }
+
+/* Borders */
+.border-theme { border-color: var(--border-color); }
+
+/* Accent text */
+.text-accent { color: var(--accent); }
+
+/* Accent gradient text */
+.text-gradient-accent {
+  background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* ========================================
+   Garden Bed Card — Primary card surface
+   Subtle warm inset with organic border radius
+   ======================================== */
+
+.garden-bed {
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.garden-bed:hover,
+.garden-bed:focus-within {
+  border-color: var(--accent-border);
+  box-shadow: 0 0 0 1px var(--accent-border);
+}
+
+/* ========================================
+   Button Styles
+   ======================================== */
+
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.5rem;
+  background-color: var(--btn-primary-bg);
+  color: var(--btn-primary-text);
+  font-weight: 600;
+  font-size: 0.875rem;
+  border-radius: 12px;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: background-color 0.2s ease, transform 0.1s ease;
+}
+
+.btn-primary:hover {
+  background-color: var(--btn-primary-hover);
+}
+
+.btn-primary:active {
+  transform: scale(0.98);
+}
+
+.btn-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.5rem;
+  background-color: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-weight: 600;
+  font-size: 0.875rem;
+  border-radius: 12px;
+  border: 1px solid var(--border-color);
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+}
+
+.btn-secondary:hover {
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+  border-color: var(--accent-border);
+}
+
+/* ========================================
+   Gentle fade-in animation
+   ======================================== */
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp 0.5s ease-out forwards;
+}
+
+.animate-fade-in-up-delay-1 { animation-delay: 0.1s; opacity: 0; }
+.animate-fade-in-up-delay-2 { animation-delay: 0.2s; opacity: 0; }
+.animate-fade-in-up-delay-3 { animation-delay: 0.3s; opacity: 0; }
+
+/* ========================================
+   Garden Divider — organic horizontal rule
+   ======================================== */
+
+.garden-divider {
+  border: none;
+  height: 1px;
+  background: linear-gradient(
+    to right,
+    transparent,
+    var(--border-color),
+    var(--accent-border),
+    var(--border-color),
+    transparent
+  );
+  margin: 2rem 0;
+}
