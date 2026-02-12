@@ -35,6 +35,22 @@ A friendly accessibility audit tool that provides AI insights and specific, acti
 
 ---
 
+## Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/home.png" alt="A11y Garden home page — enter a URL to scan" width="720" />
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/result.png" alt="Audit results page showing letter grade, issue breakdown, AI summary, and prioritized recommendations" width="720" />
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/database.png" alt="Community Garden — browse and search public accessibility audits" width="720" />
+</p>
+
+---
+
 ## Tech Stack
 
 | Layer | Technology |
