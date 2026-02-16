@@ -36,8 +36,8 @@ export default defineSchema({
     gradingVersion: v.optional(v.number()), // Tracks algorithm version for lazy recalc
 
     // Scan mode indicator
-    // "full" = all rules ran successfully (including color-contrast)
-    // "safe" = had to fall back to safe rules due to complex site (color-contrast skipped)
+    // "full" = all axe-core rules ran successfully
+    // "safe" = fell back to curated safe rules due to site complexity (see safeRules in route.ts)
     scanMode: v.optional(
       v.union(v.literal("full"), v.literal("safe"))
     ),

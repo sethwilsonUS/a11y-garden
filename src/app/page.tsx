@@ -31,7 +31,7 @@ export default function HomePage() {
             {/* Badge */}
             <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-[var(--accent-bg)] border border-[var(--accent-border)] text-accent text-sm font-medium mb-8 animate-fade-in-up">
               <SeedlingIcon className="w-4 h-4" />
-              WCAG 2.2 Compliance Checking
+              Automated WCAG 2.2 Checks
             </div>
 
             <h1 className="text-5xl lg:text-7xl font-display font-semibold text-theme-primary mb-6 leading-tight animate-fade-in-up animate-fade-in-up-delay-1">
@@ -185,12 +185,6 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* Footer */}
-      <footer className="border-t border-theme py-10">
-        <div className="container mx-auto px-4 text-center text-theme-muted text-sm">
-          <p>Tended with care. Powered by axe-core and OpenAI.</p>
-        </div>
-      </footer>
     </div>
   );
 }

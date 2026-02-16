@@ -437,3 +437,58 @@ code, pre, .font-mono {
   );
   margin: 2rem 0;
 }
+
+/* ========================================
+   Safe Mode Dialog (native <dialog>)
+   ======================================== */
+
+.safe-mode-dialog {
+  border: none;
+  border-radius: 20px;
+  padding: 0;
+  margin: auto;
+  max-width: 680px;
+  width: calc(100% - 2rem);
+  max-height: calc(100vh - 4rem);
+  background-color: var(--bg-secondary);
+  color: var(--text-primary);
+  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.25);
+  overflow: hidden;
+}
+
+.safe-mode-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+
+/* Entrance animation */
+.safe-mode-dialog[open] {
+  animation: dialogFadeIn 0.2s ease-out;
+}
+
+.safe-mode-dialog[open]::backdrop {
+  animation: backdropFadeIn 0.2s ease-out;
+}
+
+@keyframes dialogFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes backdropFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.safe-mode-dialog-content {
+  padding: 1.5rem;
+  overflow-y: auto;
+  max-height: calc(100vh - 4rem);
+}

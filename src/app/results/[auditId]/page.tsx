@@ -8,7 +8,8 @@ import { ViolationCard } from "@/components/ViolationCard";
 import { StatusIndicator } from "@/components/StatusIndicator";
 import { calculateGrade, GRADING_VERSION } from "@/lib/grading";
 import Link from "next/link";
-import { use, useEffect, useRef, useState } from "react";
+import { use, useEffect, useRef, useState, useCallback } from "react";
+import { SafeModeModal } from "@/components/SafeModeModal";
 
 // Axe-core violation structure
 interface AxeNode {
@@ -59,7 +60,9 @@ function generateMarkdownReport(audit: Audit, reportUrl?: string): string {
 
 **URL:** ${audit.url}
 **Grade:** ${audit.letterGrade} (${audit.score}/100)
-**Scanned:** ${date}${audit.scanMode === "safe" ? "\n**Note:** Partial scan (color contrast checks skipped due to site complexity)" : ""}${reportUrl ? `\n**Full Report:** ${reportUrl}` : ""}
+**Scanned:** ${date}${audit.scanMode === "safe" ? "\n**Note:** This scan ran in Safe Mode due to site complexity. Not all checks were performed." : ""}${reportUrl ? `\n**Full Report:** ${reportUrl}` : ""}
+
+> *This report reflects automated checks only and is not a substitute for a comprehensive WCAG audit.*
 
 ---
 
@@ -470,6 +473,8 @@ export default function ResultsPage({
   });
   const recalculateGrade = useMutation(api.audits.recalculateGrade);
   const hasRecalculated = useRef(false);
+  const [safeModeOpen, setSafeModeOpen] = useState(false);
+  const closeSafeMode = useCallback(() => setSafeModeOpen(false), []);
 
   // Lazy recalculation: update grade if using outdated algorithm
   useEffect(() => {
@@ -652,38 +657,56 @@ export default function ResultsPage({
               </p>
             </div>
 
-            <GradeBadge
-              grade={audit.letterGrade}
-              score={audit.score}
-              size="lg"
-            />
+            <div className="flex flex-col items-end gap-2">
+              <GradeBadge
+                grade={audit.letterGrade}
+                score={audit.score}
+                size="lg"
+              />
+              <p className="text-xs text-theme-muted italic">
+                Based on automated checks only
+              </p>
+            </div>
           </div>
 
           {/* Safe Mode Banner */}
           {audit.scanMode === "safe" && (
-            <div
-              className="rounded-xl p-4 flex items-start gap-3 border"
-              style={{
-                backgroundColor: 'var(--severity-moderate-bg)',
-                borderColor: 'var(--severity-moderate-border)',
-              }}
-            >
-              <div className="flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: 'var(--severity-moderate-bg)' }}>
-                <svg className="w-4 h-4" style={{ color: 'var(--severity-moderate)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
+            <>
+              <div
+                className="rounded-xl p-4 flex items-start gap-3 border"
+                style={{
+                  backgroundColor: 'var(--severity-moderate-bg)',
+                  borderColor: 'var(--severity-moderate-border)',
+                }}
+                role="note"
+              >
+                <div className="flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: 'var(--severity-moderate-bg)' }}>
+                  <svg className="w-4 h-4" style={{ color: 'var(--severity-moderate)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                  </svg>
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-sm font-semibold mb-1" style={{ color: 'var(--severity-moderate)' }}>
+                    Safe Mode
+                  </h3>
+                  <p className="text-sm text-theme-secondary">
+                    Because of this site&apos;s complexity, this scan ran in Safe Mode.
+                    Not all checks were performed.
+                  </p>
+                  <button
+                    onClick={() => setSafeModeOpen(true)}
+                    className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium cursor-pointer hover:underline transition-colors"
+                    style={{ color: 'var(--severity-moderate)' }}
+                  >
+                    Learn More
+                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                    </svg>
+                  </button>
+                </div>
               </div>
-              <div>
-                <h3 className="text-sm font-semibold mb-1" style={{ color: 'var(--severity-moderate)' }}>
-                  Partial Scan Results
-                </h3>
-                <p className="text-sm text-theme-secondary">
-                  This site&apos;s complexity required a reduced scan. Color contrast
-                  checks were skipped to complete the analysis. All other
-                  accessibility rules were evaluated.
-                </p>
-              </div>
-            </div>
+              <SafeModeModal open={safeModeOpen} onClose={closeSafeMode} />
+            </>
           )}
 
           {/* Truncation Banner */}
