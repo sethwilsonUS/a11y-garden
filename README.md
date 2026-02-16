@@ -32,6 +32,7 @@ A friendly accessibility audit tool that provides AI insights and specific, acti
 - 🔄 **Safe Mode Fallback** — Automatically retries with a reduced rule set when complex sites crash the full axe-core scan
 - 🚨 **Error Boundary** — Global React error boundary catches rendering crashes with a friendly recovery UI
 - ⚙️ **Graceful Degradation** — Runs without env vars for local demos; a banner warns which features are disabled
+- 💻 **CLI Tool** — Scan sites from your terminal with `a11ygarden <url>` and pipe markdown reports to files
 
 ---
 
@@ -146,6 +147,63 @@ For the complete experience with saved audits, AI insights, and user accounts:
 
 ---
 
+## CLI Usage
+
+Scan websites from your terminal — no Convex, Clerk, or browser required. Just Playwright + axe-core (and optionally OpenAI for AI summaries).
+
+### Quick Start
+
+```bash
+# From the project root (after npm install + npx playwright install chromium)
+npm run cli -- example.com
+```
+
+### Examples
+
+```bash
+# Basic scan (pretty terminal output)
+npm run cli -- walmart.com
+
+# Export a markdown report to a file
+npm run cli -- walmart.com --markdown > walmart-a11y.md
+
+# Output raw JSON (useful for piping to jq)
+npm run cli -- walmart.com --json
+
+# Skip AI summary even when OPENAI_API_KEY is set
+npm run cli -- walmart.com --no-ai
+```
+
+### Using as a Command
+
+You can also link the package to use `a11ygarden` as a global command:
+
+```bash
+npm link
+a11ygarden walmart.com
+a11ygarden walmart.com --markdown > report.md
+```
+
+### Options
+
+| Flag | Description |
+|------|-------------|
+| `--markdown` | Output a markdown report instead of the default terminal format |
+| `--json` | Output raw JSON |
+| `--no-ai` | Skip AI summary even when `OPENAI_API_KEY` is set |
+| `-V, --version` | Show version number |
+| `-h, --help` | Show help |
+
+### Environment Variables (CLI)
+
+| Variable | Required? | Purpose |
+|----------|-----------|---------|
+| `OPENAI_API_KEY` | No — AI silently skips when missing | Powers AI summaries and recommendations |
+
+The CLI uses a local Playwright browser — no Browserless token needed. AI analysis runs automatically when `OPENAI_API_KEY` is in your environment and degrades silently when it isn't.
+
+---
+
 ## Environment Variables
 
 Copy `env.example` to `.env.local` and fill in the values:
@@ -194,10 +252,13 @@ The app is designed to degrade gracefully rather than crash:
 ## Project Structure
 
 ```
+├── cli/                       # CLI tool
+│   ├── index.ts              # CLI entry point (commander + ora)
+│   └── bin.mjs               # Bin wrapper for npm link / npx
 ├── convex/                    # Convex backend
 │   ├── schema.ts             # Database schema
 │   ├── audits.ts             # Audit queries & mutations
-│   ├── ai.ts                 # OpenAI integration
+│   ├── ai.ts                 # OpenAI integration (Convex action)
 │   ├── auth.config.ts        # Clerk ↔ Convex auth config
 │   └── lib/
 │       ├── grading.ts        # Grading algorithm (source of truth)
@@ -212,7 +273,7 @@ The app is designed to degrade gracefully rather than crash:
 │   │   ├── dashboard/        # User dashboard (auth required)
 │   │   ├── sign-in/          # Clerk sign-in page
 │   │   ├── sign-up/          # Clerk sign-up page
-│   │   └── api/scan/         # Playwright + axe-core scan endpoint
+│   │   └── api/scan/         # Scan API (delegates to shared scanner)
 │   ├── components/
 │   │   ├── ErrorBoundary.tsx  # Global React error boundary
 │   │   ├── ScanForm.tsx       # URL input + scan orchestration
@@ -221,6 +282,9 @@ The app is designed to degrade gracefully rather than crash:
 │   │   ├── ViolationCard.tsx  # Severity breakdown cards
 │   │   └── ThemeProvider.tsx  # Light/dark theme context
 │   └── lib/
+│       ├── scanner.ts        # Shared scan engine (Playwright + axe-core)
+│       ├── report.ts         # Shared markdown report generator
+│       ├── ai-summary.ts     # Standalone OpenAI integration (CLI)
 │       ├── grading.ts        # Client-side grading (mirrors Convex)
 │       ├── rate-limit.ts     # Upstash rate limiting & concurrency
 │       └── url-validator.ts  # SSRF-safe URL validation
@@ -230,6 +294,8 @@ The app is designed to degrade gracefully rather than crash:
 ---
 
 ## How It Works
+
+### Web App
 
 ```
 ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐
@@ -244,6 +310,16 @@ The app is designed to degrade gracefully rather than crash:
                 │  Page    │    │ Analysis │    │ Database │    │Calculated│
                 │          │    │(bkground)|    │          │    │          │
                 └──────────┘    └──────────┘    └──────────┘    └──────────┘
+```
+
+### CLI
+
+```
+┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐
+│  User    │    │Playwright│    │  Grade   │    │  OpenAI  │    │ Markdown │
+│  runs    │ ─▶ │+ axe-core│ ─▶ │Calculated│ ─▶ │ Summary  │ ─▶ │ Report   │
+│  CLI     │    │ (local)  │    │          │    │(optional)│    │ → stdout │
+└──────────┘    └──────────┘    └──────────┘    └──────────┘    └──────────┘
 ```
 
 1. **User enters a URL** — The scan form validates, normalizes, and strips `www.`
@@ -302,6 +378,7 @@ npm run browserless      # Run the Browserless Docker container
 npm run browserless:stop # Stop the Browserless container
 npm run build            # Production build (deploys Convex + builds Next.js)
 npm run start            # Start production server
+npm run cli -- <url>     # Scan a URL from the terminal (see CLI Usage)
 npm run test             # Run tests in watch mode (vitest)
 npm run test:run         # Run tests once
 npm run test:coverage    # Run tests with coverage report
@@ -356,4 +433,6 @@ This project is licensed under the MIT License — see the [LICENSE](LICENSE) fi
 - [Clerk](https://clerk.com) — Authentication
 - [OpenAI](https://openai.com) — AI analysis
 - [Upstash](https://upstash.com/) — Serverless Redis for rate limiting
+- [Commander.js](https://github.com/tj/commander.js) — CLI framework
+- [chalk](https://github.com/chalk/chalk) + [ora](https://github.com/sindresorhus/ora) — Terminal styling and spinners
 - [Deque Systems](https://www.deque.com/) — WCAG expertise and axe-core development
