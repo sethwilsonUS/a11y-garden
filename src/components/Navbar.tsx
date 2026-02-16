@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { SignInButton, SignUpButton, UserButton, useAuth } from "@clerk/nextjs";
 import { ThemeToggle } from "./ThemeToggle";
+import { getNavLinks } from "@/lib/nav-links";
 
 function LeafLogo({ className }: { className?: string }) {
   return (
@@ -34,16 +35,16 @@ export function Navbar() {
   const pathname = usePathname();
   const { isSignedIn, isLoaded } = useAuth();
 
-  const navLinks = [
-    { href: "/", label: "Home" },
-    { href: "/database", label: "Garden" },
-    ...(process.env.NODE_ENV === "development"
-      ? [
-          { href: "/demo", label: "🧪 Demo" },
-          { href: "/test-error", label: "💥 Error" },
-        ]
-      : []),
-  ];
+  // Dev-only emoji prefixes for quick visual distinction in the navbar
+  const devEmojis: Record<string, string> = {
+    "/demo": "🧪 ",
+    "/test-error": "💥 ",
+  };
+
+  const navLinks = getNavLinks().map((link) => ({
+    ...link,
+    label: (devEmojis[link.href] ?? "") + link.label,
+  }));
 
   const isActive = (href: string) => {
     if (href === "/") return pathname === "/";

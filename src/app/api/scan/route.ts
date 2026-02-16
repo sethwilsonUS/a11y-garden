@@ -515,7 +515,7 @@ export async function POST(request: NextRequest) {
           score,
           gradingVersion: GRADING_VERSION,
           rawViolations,
-          // Indicate if we used safe mode (color-contrast checks were skipped)
+          // Indicate if we used safe mode (fell back to curated safe rules)
           safeMode: usedSafeMode,
           // Flag when node details were trimmed to fit the size cap
           ...(truncated && { truncated: true }),
