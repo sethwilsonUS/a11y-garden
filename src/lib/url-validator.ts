@@ -68,9 +68,13 @@ function isPrivateIPv6(ip: string): boolean {
     if (normalized.startsWith(prefix)) return true;
   }
   // IPv4-mapped IPv6 (::ffff:x.x.x.x)
+  // Note: currently unreachable because "::" in PRIVATE_IPV6_PREFIXES
+  // catches all ::ffff: addresses first. Kept as defense-in-depth.
+  /* v8 ignore start */
   const v4Match = normalized.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
   if (v4Match) return isPrivateIPv4(v4Match[1]);
   return false;
+  /* v8 ignore stop */
 }
 
 /**
@@ -100,9 +104,11 @@ export async function validateUrl(rawUrl: string): Promise<UrlValidationResult> 
 
   // ---- Hostname check -----------------------------------------------------
   const hostname = parsed.hostname;
+  /* v8 ignore start -- defensive guard; URL() throws before hostname can be empty */
   if (!hostname) {
     return { ok: false, reason: "URL is missing a hostname." };
   }
+  /* v8 ignore stop */
 
   // Block IP addresses embedded directly as hostnames in production
   // (users should provide domain names; direct IPs bypass DNS resolution)

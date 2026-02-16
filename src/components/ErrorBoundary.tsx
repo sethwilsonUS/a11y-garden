@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import Link from "next/link";
 
 interface ErrorBoundaryProps {
   children: React.ReactNode;
@@ -111,9 +112,9 @@ export class ErrorBoundary extends React.Component<
             <button onClick={this.handleReset} className="btn-primary">
               Try again
             </button>
-            <a href="/" className="btn-secondary">
+            <Link href="/" className="btn-secondary">
               Go home
-            </a>
+            </Link>
           </div>
         </div>
       </div>
