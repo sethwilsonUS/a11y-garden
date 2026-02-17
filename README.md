@@ -28,6 +28,7 @@ A friendly accessibility audit tool that provides AI insights and specific, acti
 - 📋 **Export Reports** — Copy markdown reports for documentation or issue tracking
 - 🛡️ **Rate Limiting & Concurrency** — Per-IP sliding window (5 scans/hour) and global concurrency cap via Upstash Redis
 - 🔒 **SSRF Protection** — URL validation blocks private IP ranges and non-HTTP schemes in production
+- 📸 **Page Screenshots** — Captures a JPEG screenshot at scan time so users can verify the scanner reached the real site (not a firewall page)
 - 🧱 **WAF / Bot-Block Detection** — Detects when a site's firewall blocks the scanner and warns the user instead of returning misleading results
 - 🔄 **Safe Mode Fallback** — Automatically retries with a reduced rule set when complex sites crash the full axe-core scan
 - 🚨 **Error Boundary** — Global React error boundary catches rendering crashes with a friendly recovery UI
@@ -172,6 +173,12 @@ npm run cli -- walmart.com --json
 
 # Skip AI summary even when OPENAI_API_KEY is set
 npm run cli -- walmart.com --no-ai
+
+# Save a screenshot of the scanned page
+npm run cli -- walmart.com --screenshot
+
+# Save screenshot to a custom path
+npm run cli -- walmart.com --screenshot walmart-screenshot.jpg
 ```
 
 ### Using as a Command
@@ -191,6 +198,7 @@ a11ygarden walmart.com --markdown > report.md
 | `--markdown` | Output a markdown report instead of the default terminal format |
 | `--json` | Output raw JSON |
 | `--no-ai` | Skip AI summary even when `OPENAI_API_KEY` is set |
+| `--screenshot [path]` | Save a JPEG screenshot of the scanned page (default: `screenshot.jpg`) |
 | `-V, --version` | Show version number |
 | `-h, --help` | Show help |
 
@@ -275,12 +283,13 @@ The app is designed to degrade gracefully rather than crash:
 │   │   ├── sign-up/          # Clerk sign-up page
 │   │   └── api/scan/         # Scan API (delegates to shared scanner)
 │   ├── components/
-│   │   ├── ErrorBoundary.tsx  # Global React error boundary
-│   │   ├── ScanForm.tsx       # URL input + scan orchestration
-│   │   ├── Navbar.tsx         # Top nav (dev links in development)
-│   │   ├── GradeBadge.tsx     # Letter grade display
-│   │   ├── ViolationCard.tsx  # Severity breakdown cards
-│   │   └── ThemeProvider.tsx  # Light/dark theme context
+│   │   ├── ErrorBoundary.tsx      # Global React error boundary
+│   │   ├── ScanForm.tsx           # URL input + scan orchestration
+│   │   ├── ScreenshotSection.tsx  # Collapsible screenshot viewer
+│   │   ├── Navbar.tsx             # Top nav (dev links in development)
+│   │   ├── GradeBadge.tsx         # Letter grade display
+│   │   ├── ViolationCard.tsx      # Severity breakdown cards
+│   │   └── ThemeProvider.tsx      # Light/dark theme context
 │   └── lib/
 │       ├── scanner.ts        # Shared scan engine (Playwright + axe-core)
 │       ├── report.ts         # Shared markdown report generator
@@ -299,27 +308,34 @@ The app is designed to degrade gracefully rather than crash:
 
 ```
 ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐
-│  User    │    │  Rate    │    │  SSRF    │    │Playwright│    │ Truncate │
-│  submits │ ─▶ │  Limit   │ ─▶ │  Check   │ ─▶ │+ axe-core│ ─▶ │ if >500KB│
-│  URL     │    │ (Upstash)│    │          │    │          │    │          │
+│  User    │    │  Rate    │    │  SSRF    │    │Playwright│    │Screenshot│
+│  submits │ ─▶ │  Limit   │ ─▶ │  Check   │ ─▶ │+ axe-core│ ─▶ │+ Truncate│
+│  URL     │    │ (Upstash)│    │          │    │          │    │ if >500KB│
 └──────────┘    └──────────┘    └──────────┘    └──────────┘    └──────────┘
                                                                       │
                                                                       ▼
                 ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐
                 │  Results │ ◀─ │  OpenAI  │ ◀─ │  Convex  │ ◀─ │  Grade   │
                 │  Page    │    │ Analysis │    │ Database │    │Calculated│
-                │          │    │(bkground)|    │          │    │          │
-                └──────────┘    └──────────┘    └──────────┘    └──────────┘
+                │(+screenshot)  │(bkground)|    │(+file    │    │          │
+                └──────────┘    └──────────┘    │ storage) │    └──────────┘
+                                                └──────────┘
 ```
 
 ### CLI
 
 ```
 ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐
-│  User    │    │Playwright│    │  Grade   │    │  OpenAI  │    │ Markdown │
-│  runs    │ ─▶ │+ axe-core│ ─▶ │Calculated│ ─▶ │ Summary  │ ─▶ │ Report   │
-│  CLI     │    │ (local)  │    │          │    │(optional)│    │ → stdout │
+│  User    │    │Playwright│    │Screenshot│    │  OpenAI  │    │ Markdown │
+│  runs    │ ─▶ │+ axe-core│ ─▶ │+ Grade   │ ─▶ │ Summary  │ ─▶ │ Report   │
+│  CLI     │    │ (local)  │    │Calculated│    │(optional)│    │ → stdout │
 └──────────┘    └──────────┘    └──────────┘    └──────────┘    └──────────┘
+                                      │
+                                      ▼ (if --screenshot)
+                                ┌──────────┐
+                                │  JPEG    │
+                                │  → disk  │
+                                └──────────┘
 ```
 
 1. **User enters a URL** — The scan form validates, normalizes, and strips `www.`
@@ -327,11 +343,12 @@ The app is designed to degrade gracefully rather than crash:
 3. **URL validated** — SSRF protection blocks private IPs and non-HTTP schemes in production
 4. **Playwright scans** — A headless browser navigates to the page and runs axe-core; falls back to safe mode if the full scan crashes on complex sites
 5. **WAF check** — If a firewall blocked the scanner, the user gets a clear message instead of misleading results
-6. **Results truncated** — If raw violations exceed 500 KB, node arrays are trimmed to protect storage
-7. **Audit saved** — Only after a successful scan is the audit record created in Convex (avoids orphan records on failure)
-8. **Grade calculated** — A letter grade (A–F) is computed using weighted penalties and hard caps
-9. **AI analyzes** — OpenAI generates a plain-English summary and prioritized recommendations (fires in the background)
-10. **Results displayed** — The user is redirected to the results page immediately; the AI summary streams in when ready
+6. **Screenshot captured** — A JPEG screenshot is taken of the loaded page (before axe injection) so users can verify the scanner saw the real site
+7. **Results truncated** — If raw violations exceed 500 KB, node arrays are trimmed to protect storage
+8. **Audit saved** — Only after a successful scan is the audit record created in Convex (avoids orphan records on failure). The screenshot is uploaded to Convex file storage and linked to the audit.
+9. **Grade calculated** — A letter grade (A–F) is computed using weighted penalties and hard caps
+10. **AI analyzes** — OpenAI generates a plain-English summary and prioritized recommendations (fires in the background)
+11. **Results displayed** — The user is redirected to the results page immediately; the AI summary streams in when ready. A collapsible screenshot section lets users verify the scanned page.
 
 ---
 

@@ -171,11 +171,15 @@ export interface ScanResult {
   safeMode: boolean;
   truncated: boolean;
   warning?: string;
+  /** JPEG screenshot of the page at scan time (only when captureScreenshot is true). */
+  screenshot?: Buffer;
 }
 
 export interface ScanOptions {
   /** WebSocket endpoint for a remote browser (e.g. Browserless). */
   browserWSEndpoint?: string;
+  /** When true, capture a JPEG screenshot of the page before running axe-core. */
+  captureScreenshot?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -348,6 +352,20 @@ export async function scanUrl(
       );
     }
 
+    // --- Capture screenshot (before axe injection, shows what the scanner saw) ---
+    let screenshot: Buffer | undefined;
+    if (options.captureScreenshot) {
+      try {
+        screenshot = await page.screenshot({
+          type: "jpeg",
+          quality: 75,
+          fullPage: false, // viewport only — keeps file size reasonable (~200-400 KB)
+        });
+      } catch {
+        // Screenshot failure shouldn't block the scan
+      }
+    }
+
     // Inject axe-core into the page via evaluate (works regardless of CSP)
     const axeSource = await getAxeCoreSource();
     await page.evaluate(axeSource);
@@ -478,6 +496,7 @@ export async function scanUrl(
       safeMode: usedSafeMode,
       truncated,
       ...(warning && { warning }),
+      ...(screenshot && { screenshot }),
     };
   } finally {
     await browser.close();

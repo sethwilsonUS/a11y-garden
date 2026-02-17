@@ -56,6 +56,9 @@ export default defineSchema({
     userId: v.optional(v.string()),
     isPublic: v.boolean(),
 
+    // Screenshot of the scanned page (stored via Convex file storage)
+    screenshotId: v.optional(v.id("_storage")),
+
     // Error handling
     errorMessage: v.optional(v.string()),
   })

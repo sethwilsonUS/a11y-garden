@@ -167,6 +167,13 @@ export const updateAuditStatus = mutation({
   },
 });
 
+// Generate a short-lived upload URL for storing files (e.g. screenshots)
+export const generateUploadUrl = mutation({
+  handler: async (ctx) => {
+    return await ctx.storage.generateUploadUrl();
+  },
+});
+
 // Update audit with scan results
 export const updateAuditWithResults = mutation({
   args: {
@@ -201,6 +208,8 @@ export const updateAuditWithResults = mutation({
     pageTitle: v.optional(v.string()),
     // True when raw violations were trimmed to fit the 500 KB size cap
     truncated: v.optional(v.boolean()),
+    // Screenshot of the scanned page (Convex file storage ID)
+    screenshotId: v.optional(v.id("_storage")),
   },
   handler: async (ctx, args) => {
     await verifyAuditOwnership(ctx, args.auditId);
@@ -273,6 +282,16 @@ export const getRecentAudits = query({
       .filter((q) => q.eq(q.field("status"), "complete"))
       .order("desc")
       .take(limit);
+  },
+});
+
+// Get the screenshot URL for an audit (resolves storageId → serving URL)
+export const getScreenshotUrl = query({
+  args: { auditId: v.id("audits") },
+  handler: async (ctx, args) => {
+    const audit = await ctx.db.get(args.auditId);
+    if (!audit?.screenshotId) return null;
+    return await ctx.storage.getUrl(audit.screenshotId);
   },
 });
 

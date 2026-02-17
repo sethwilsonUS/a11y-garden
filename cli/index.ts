@@ -15,7 +15,7 @@
  *   a11ygarden <url> --markdown > report.md
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 // ---------------------------------------------------------------------------
@@ -251,10 +251,11 @@ program
   .option("--no-ai", "Skip AI summary even if OPENAI_API_KEY is set")
   .option("--markdown", "Output a markdown report instead of terminal format")
   .option("--json", "Output raw JSON")
+  .option("--screenshot [path]", "Save a screenshot of the scanned page (default: screenshot.jpg)")
   .action(
     async (
       rawUrl: string,
-      options: { ai: boolean; markdown: boolean; json: boolean },
+      options: { ai: boolean; markdown: boolean; json: boolean; screenshot?: boolean | string },
     ) => {
       // ---- Normalize URL ----------------------------------------------------
       let url = rawUrl.trim();
@@ -281,9 +282,11 @@ program
         stream: process.stderr,
       }).start();
 
+      const wantsScreenshot = options.screenshot !== undefined && options.screenshot !== false;
+
       let scanResult;
       try {
-        scanResult = await scanUrl(url);
+        scanResult = await scanUrl(url, { captureScreenshot: wantsScreenshot });
       } catch (error) {
         if (error instanceof ScanBlockedError) {
           spinner.fail(
@@ -309,6 +312,25 @@ program
         `Page loaded: ${chalk.white.bold(`"${scanResult.pageTitle || "Untitled"}"`)}` +
           (scanResult.safeMode ? chalk.yellow(" (safe mode)") : ""),
       );
+
+      // ---- Screenshot (optional) ---------------------------------------------
+      if (wantsScreenshot && scanResult.screenshot) {
+        const outPath =
+          typeof options.screenshot === "string"
+            ? options.screenshot
+            : "screenshot.jpg";
+        writeFileSync(outPath, scanResult.screenshot);
+        const sizeKB = Math.round(scanResult.screenshot.length / 1024);
+        if (isTTY) {
+          console.error(
+            chalk.green(`  ✓ Screenshot saved to ${chalk.white.bold(outPath)} (${sizeKB} KB)\n`),
+          );
+        }
+      } else if (wantsScreenshot && !scanResult.screenshot) {
+        if (isTTY) {
+          console.error(chalk.yellow("  ⚠ Screenshot capture failed\n"));
+        }
+      }
 
       // ---- Grade ------------------------------------------------------------
       const { score, grade } = calculateGrade(scanResult.violations);

@@ -21,6 +21,7 @@ export function ScanForm() {
   const updateAuditWithResults = useMutation(api.audits.updateAuditWithResults);
   const updateAuditError = useMutation(api.audits.updateAuditError);
   const analyzeViolations = useAction(api.ai.analyzeViolations);
+  const generateUploadUrl = useMutation(api.audits.generateUploadUrl);
   const router = useRouter();
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -102,7 +103,31 @@ export function ScanForm() {
         isPublic,
       });
 
-      // Step 3: Update Convex with scan results and mark as complete
+      // Step 3: Upload screenshot to Convex file storage (if available)
+      let screenshotId: Id<"_storage"> | undefined;
+      if (scanResult.screenshotBase64) {
+        try {
+          const uploadUrl = await generateUploadUrl();
+          const binaryStr = atob(scanResult.screenshotBase64);
+          const bytes = new Uint8Array(binaryStr.length);
+          for (let i = 0; i < binaryStr.length; i++) {
+            bytes[i] = binaryStr.charCodeAt(i);
+          }
+          const uploadResp = await fetch(uploadUrl, {
+            method: "POST",
+            headers: { "Content-Type": "image/jpeg" },
+            body: bytes,
+          });
+          if (uploadResp.ok) {
+            const { storageId } = await uploadResp.json();
+            screenshotId = storageId as Id<"_storage">;
+          }
+        } catch {
+          // Screenshot upload failure shouldn't block saving results
+        }
+      }
+
+      // Step 4: Update Convex with scan results and mark as complete
       setScanStatus("Finalizing...");
       await updateAuditStatus({ auditId, status: "scanning" });
       await updateAuditWithResults({
@@ -116,12 +141,13 @@ export function ScanForm() {
         scanMode: scanResult.safeMode ? "safe" : "full",
         ...(scanResult.pageTitle ? { pageTitle: scanResult.pageTitle } : {}),
         ...(scanResult.truncated ? { truncated: true } : {}),
+        ...(screenshotId ? { screenshotId } : {}),
       });
 
-      // Step 4: Fire off AI analysis in background (don't await)
+      // Step 5: Fire off AI analysis in background (don't await)
       analyzeViolations({ auditId });
 
-      // Step 5: Navigate to results immediately
+      // Step 6: Navigate to results immediately
       router.push(`/results/${auditId}`);
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : "Failed to create audit";

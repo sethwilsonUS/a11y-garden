@@ -102,7 +102,10 @@ export async function POST(request: NextRequest) {
       }
 
       // ---- Run the scan -----------------------------------------------------
-      const scanResult = await scanUrl(validation.url, { browserWSEndpoint });
+      const scanResult = await scanUrl(validation.url, {
+        browserWSEndpoint,
+        captureScreenshot: true,
+      });
 
       // ---- Calculate grade --------------------------------------------------
       const { score, grade } = calculateGrade(scanResult.violations);
@@ -122,6 +125,10 @@ export async function POST(request: NextRequest) {
         ...(scanResult.pageTitle && { pageTitle: scanResult.pageTitle }),
         // Include warning if site was too complex for full scan
         ...(scanResult.warning && { warning: scanResult.warning }),
+        // Include base64-encoded JPEG screenshot for client-side upload to Convex
+        ...(scanResult.screenshot && {
+          screenshotBase64: scanResult.screenshot.toString("base64"),
+        }),
       });
     } finally {
       // Always release the concurrency slot, even on error
