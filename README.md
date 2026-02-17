@@ -227,11 +227,18 @@ NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
 CONVEX_DEPLOYMENT=dev:your-deployment-name
 NEXT_PUBLIC_CONVEX_URL=https://your-deployment.convex.cloud
 
+# OpenAI (optional — used by the CLI for AI summaries)
+# The web app reads OPENAI_API_KEY from the Convex dashboard instead.
+# OPENAI_API_KEY=sk-...
+
 # Upstash Redis — rate limiting & concurrency (https://console.upstash.com)
 # Optional in dev (rate limiting is disabled without these).
 # Required in production to prevent abuse.
-UPSTASH_REDIS_REST_URL=https://...upstash.io
-UPSTASH_REDIS_REST_TOKEN=...
+# UPSTASH_REDIS_REST_URL=https://...upstash.io
+# UPSTASH_REDIS_REST_TOKEN=...
+
+# Force-enable rate limiting in local dev (for testing):
+# RATE_LIMIT_ENABLED=true
 
 # OPTIONAL: Browserless (production only — local dev uses a local Chromium)
 # BROWSERLESS_TOKEN=your-token
@@ -254,6 +261,9 @@ The app is designed to degrade gracefully rather than crash:
 | `NEXT_PUBLIC_CONVEX_URL` | App runs without Convex/Clerk — `/demo` still works. A banner warns that features are disabled. | Same behavior; auth and database features are unavailable. |
 | `BROWSERLESS_TOKEN` | Not needed — Playwright launches a local browser. | Scan API returns a 500 with a descriptive error message. |
 | `OPENAI_API_KEY` (Convex) | AI summary/recommendations are skipped with a clear error logged. | Same — scans work, but AI analysis fails gracefully. |
+| `OPENAI_API_KEY` (.env.local) | CLI skips AI summary unless `--no-ai` is passed. | N/A (CLI only). |
+| `UPSTASH_REDIS_REST_URL/TOKEN` | Rate limiting disabled — all scans allowed. | **Required** — prevents abuse via per-IP rate limits and concurrency caps. |
+| `RATE_LIMIT_ENABLED` | Rate limiting stays off (default). Set to `true` to test locally. | Not needed — rate limiting is always on when Upstash vars are present. |
 
 ---
 
