@@ -3,6 +3,8 @@ import {
   truncateViolations,
   ScanBlockedError,
   type AxeViolationRaw,
+  type ScanResult,
+  type ScanOptions,
 } from "./scanner";
 
 // ---------------------------------------------------------------------------
@@ -218,5 +220,64 @@ describe("ScanBlockedError", () => {
       // Should not reach here
       expect.unreachable("Should be instanceof ScanBlockedError");
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ScanResult & ScanOptions type contracts
+// ---------------------------------------------------------------------------
+// These tests verify the type contracts are maintained (screenshot fields are
+// optional and don't break existing consumers).
+
+describe("ScanResult type contract", () => {
+  it("allows ScanResult without screenshot (backwards-compatible)", () => {
+    const result: ScanResult = {
+      violations: { critical: 0, serious: 0, moderate: 0, minor: 0, total: 0 },
+      rawViolations: "[]",
+      pageTitle: "Test",
+      safeMode: false,
+      truncated: false,
+    };
+
+    expect(result.screenshot).toBeUndefined();
+  });
+
+  it("allows ScanResult with screenshot buffer", () => {
+    const fakeScreenshot = Buffer.from("fake-jpeg-data");
+    const result: ScanResult = {
+      violations: { critical: 1, serious: 0, moderate: 0, minor: 0, total: 1 },
+      rawViolations: "[]",
+      pageTitle: "Test",
+      safeMode: false,
+      truncated: false,
+      screenshot: fakeScreenshot,
+    };
+
+    expect(result.screenshot).toBe(fakeScreenshot);
+    expect(result.screenshot).toBeInstanceOf(Buffer);
+  });
+});
+
+describe("ScanOptions type contract", () => {
+  it("allows ScanOptions without captureScreenshot (backwards-compatible)", () => {
+    const opts: ScanOptions = {};
+
+    expect(opts.captureScreenshot).toBeUndefined();
+  });
+
+  it("allows ScanOptions with captureScreenshot flag", () => {
+    const opts: ScanOptions = { captureScreenshot: true };
+
+    expect(opts.captureScreenshot).toBe(true);
+  });
+
+  it("allows combining browserWSEndpoint and captureScreenshot", () => {
+    const opts: ScanOptions = {
+      browserWSEndpoint: "ws://localhost:3001",
+      captureScreenshot: true,
+    };
+
+    expect(opts.browserWSEndpoint).toBe("ws://localhost:3001");
+    expect(opts.captureScreenshot).toBe(true);
   });
 });

@@ -11,6 +11,7 @@ import { generateMarkdownReport, type AxeViolation, type ReportData } from "@/li
 import Link from "next/link";
 import { use, useEffect, useRef, useState, useCallback } from "react";
 import { SafeModeModal } from "@/components/SafeModeModal";
+import { ScreenshotSection } from "@/components/ScreenshotSection";
 
 interface Audit extends ReportData {
   domain: string;
@@ -616,6 +617,9 @@ export default function ResultsPage({
               </div>
             </div>
           )}
+
+          {/* Page Screenshot (collapsible, for verification) */}
+          <ScreenshotSection auditId={audit._id} />
 
           {/* Violations by Severity — "Garden Beds" */}
           <section>
