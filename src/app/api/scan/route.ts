@@ -129,6 +129,10 @@ export async function POST(request: NextRequest) {
         ...(scanResult.screenshot && {
           screenshotBase64: scanResult.screenshot.toString("base64"),
         }),
+        // Include screenshot warning (e.g. "appears blank") so the client can display it
+        ...(scanResult.screenshotWarning && {
+          screenshotWarning: scanResult.screenshotWarning,
+        }),
       });
     } finally {
       // Always release the concurrency slot, even on error

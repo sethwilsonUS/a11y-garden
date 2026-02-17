@@ -62,7 +62,7 @@ function ClerkThemeWrapper({ children }: { children: ReactNode }) {
       appearance={{
         baseTheme: isDark ? dark : undefined,
         variables: {
-          colorPrimary: isDark ? "#34d399" : "#047857",
+          colorPrimary: isDark ? "#34d399" : "#036B4A",
           colorBackground: isDark ? "#1e1e1e" : "#f7f6f3",
           colorInputBackground: isDark ? "#2a2a2a" : "#efede8",
           colorInputText: isDark ? "#f0ede6" : "#1a1a1a",

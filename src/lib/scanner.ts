@@ -135,6 +135,82 @@ export function truncateViolations(violations: AxeViolationRaw[]): {
 }
 
 // ---------------------------------------------------------------------------
+// Docker localhost rewriting
+// ---------------------------------------------------------------------------
+
+/**
+ * When scanning via a Docker-based remote browser (e.g. Browserless), URLs
+ * targeting `localhost` / `127.x.x.x` / `[::1]` on the host machine won't
+ * resolve — inside the container, `localhost` refers to the container itself.
+ *
+ * This helper rewrites the hostname to `host.docker.internal` which Docker
+ * Desktop (macOS & Windows) and modern Linux Docker resolve to the host.
+ *
+ * Only applied when the WebSocket endpoint itself points to localhost (meaning
+ * a local Docker container). Cloud Browserless endpoints are left alone.
+ */
+
+const LOCALHOST_RE = /^(localhost|127(?:\.\d+){3}|\[?::1\]?)$/i;
+
+function isLocalWSEndpoint(wsEndpoint: string): boolean {
+  try {
+    // ws:// URLs can be parsed like http:// URLs for hostname extraction
+    const url = new URL(wsEndpoint.replace(/^ws(s?):/, "http$1:"));
+    return LOCALHOST_RE.test(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Rewrite localhost targets to `host.docker.internal` when scanning through a
+ * local Docker-based browser. Returns the URL unchanged for non-local targets
+ * or when no remote browser is in use.
+ */
+function rewriteLocalhostForDocker(
+  targetUrl: string,
+  wsEndpoint: string | undefined,
+): { url: string; rewritten: boolean } {
+  if (!wsEndpoint || !isLocalWSEndpoint(wsEndpoint)) {
+    return { url: targetUrl, rewritten: false };
+  }
+
+  try {
+    const parsed = new URL(targetUrl);
+    if (LOCALHOST_RE.test(parsed.hostname)) {
+      parsed.hostname = "host.docker.internal";
+      return { url: parsed.toString(), rewritten: true };
+    }
+  } catch {
+    // URL parsing failed — return unchanged
+  }
+
+  return { url: targetUrl, rewritten: false };
+}
+
+// ---------------------------------------------------------------------------
+// Blank screenshot detection
+// ---------------------------------------------------------------------------
+
+/**
+ * Heuristic check for blank (all-white or near-white) JPEG screenshots.
+ *
+ * JPEG files have a structured format, but decoding them fully would require
+ * a library. Instead we use a fast heuristic: a blank white JPEG compresses
+ * extremely well, so the file is very small relative to the viewport size
+ * (1920×1080). Real web pages with text, images, and colour produce much
+ * larger files even at quality 75.
+ *
+ * Threshold: a 1920×1080 all-white JPEG at q75 is typically 15-25 KB.
+ * Anything under 30 KB is suspiciously blank.
+ */
+function isLikelyBlankScreenshot(buffer: Buffer): boolean {
+  // A 1920×1080 JPEG of a real web page is typically 200-600 KB.
+  // A plain white/solid colour page compresses to ~15-25 KB.
+  return buffer.length < 30_000;
+}
+
+// ---------------------------------------------------------------------------
 // Custom error types
 // ---------------------------------------------------------------------------
 
@@ -173,6 +249,8 @@ export interface ScanResult {
   warning?: string;
   /** JPEG screenshot of the page at scan time (only when captureScreenshot is true). */
   screenshot?: Buffer;
+  /** Warning about the screenshot (e.g. appears blank). */
+  screenshotWarning?: string;
 }
 
 export interface ScanOptions {
@@ -263,18 +341,28 @@ export async function scanUrl(
   url: string,
   options: ScanOptions = {},
 ): Promise<ScanResult> {
+  // When scanning through a Docker-based remote browser, rewrite localhost
+  // targets so the container can reach the host machine.
+  const { url: effectiveUrl, rewritten: urlRewritten } =
+    rewriteLocalhostForDocker(url, options.browserWSEndpoint);
+
   // Launch or connect to a browser
   const browser = options.browserWSEndpoint
     ? await chromium.connectOverCDP(options.browserWSEndpoint)
     : await chromium.launch({ headless: true });
 
   try {
+    const isRemoteBrowser = !!options.browserWSEndpoint;
+
     // Use a realistic viewport and user agent to avoid bot detection.
     // ignoreHTTPSErrors: sites with expired/self-signed certs should still
     // be scannable — we're auditing accessibility, not TLS configuration.
+    // colorScheme is set explicitly so local Playwright and remote Browserless
+    // always evaluate prefers-color-scheme identically.
     const context = await browser.newContext({
       ignoreHTTPSErrors: true,
       viewport: { width: 1920, height: 1080 },
+      colorScheme: "light",
       userAgent:
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
       // Extra headers real browsers send
@@ -307,7 +395,7 @@ export async function scanUrl(
     // Navigate to URL - use "domcontentloaded" instead of "networkidle"
     // Complex sites like Amazon/Walmart never reach networkidle due to
     // constant analytics, ads, and real-time updates
-    const response = await page.goto(url, {
+    const response = await page.goto(effectiveUrl, {
       waitUntil: "domcontentloaded",
       timeout: 30000,
     });
@@ -318,8 +406,10 @@ export async function scanUrl(
       // Ignore load state timeout - proceed with what we have
     });
 
-    // Additional wait for JS-heavy sites to render content
-    await page.waitForTimeout(2000);
+    // Additional wait for JS-heavy sites to render content.
+    // Remote browsers (Docker/cloud) get extra time for network overhead
+    // between the CDP commands and the actual page load.
+    await page.waitForTimeout(isRemoteBrowser ? 3000 : 2000);
 
     // Grab the page title while we have the page loaded
     const pageTitle = await page.title().catch(() => "");
@@ -354,6 +444,7 @@ export async function scanUrl(
 
     // --- Capture screenshot (before axe injection, shows what the scanner saw) ---
     let screenshot: Buffer | undefined;
+    let screenshotWarning: string | undefined;
     if (options.captureScreenshot) {
       try {
         screenshot = await page.screenshot({
@@ -361,6 +452,28 @@ export async function scanUrl(
           quality: 75,
           fullPage: false, // viewport only — keeps file size reasonable (~200-400 KB)
         });
+
+        // Detect blank/white screenshots — these happen when JS-heavy pages
+        // haven't finished rendering yet (e.g. SPAs, pages behind auth).
+        // Sample pixels from the raw JPEG buffer; if they're all near-white,
+        // wait longer and retry once.
+        if (screenshot && isLikelyBlankScreenshot(screenshot)) {
+          // Retry: give the page more time to render
+          await page.waitForTimeout(4000);
+          const retryScreenshot = await page.screenshot({
+            type: "jpeg",
+            quality: 75,
+            fullPage: false,
+          });
+          if (retryScreenshot && !isLikelyBlankScreenshot(retryScreenshot)) {
+            screenshot = retryScreenshot;
+          } else {
+            // Still blank after retry — keep it but flag a warning
+            screenshotWarning =
+              "Screenshot appears blank. The page may not have fully rendered " +
+              "(e.g. client-side JS still loading, auth wall, or empty page).";
+          }
+        }
       } catch {
         // Screenshot failure shouldn't block the scan
       }
@@ -489,14 +602,25 @@ export async function scanUrl(
       results.violations as AxeViolationRaw[],
     );
 
+    // Combine warnings (scan warnings + Docker rewrite notice)
+    const combinedWarnings = [
+      warning,
+      urlRewritten
+        ? `URL rewritten from localhost to host.docker.internal for Docker-based browser.`
+        : undefined,
+    ]
+      .filter(Boolean)
+      .join(" ");
+
     return {
       violations,
       rawViolations,
       pageTitle,
       safeMode: usedSafeMode,
       truncated,
-      ...(warning && { warning }),
+      ...(combinedWarnings && { warning: combinedWarnings }),
       ...(screenshot && { screenshot }),
+      ...(screenshotWarning && { screenshotWarning }),
     };
   } finally {
     await browser.close();

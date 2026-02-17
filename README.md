@@ -179,6 +179,12 @@ npm run cli -- walmart.com --screenshot
 
 # Save screenshot to a custom path
 npm run cli -- walmart.com --screenshot walmart-screenshot.jpg
+
+# Scan your local dev server
+npm run cli -- localhost:3000
+
+# Force local Playwright even when BROWSERLESS_URL is set
+npm run cli -- walmart.com --local
 ```
 
 ### Using as a Command
@@ -199,6 +205,7 @@ a11ygarden walmart.com --markdown > report.md
 | `--json` | Output raw JSON |
 | `--no-ai` | Skip AI summary even when `OPENAI_API_KEY` is set |
 | `--screenshot [path]` | Save a JPEG screenshot of the scanned page (default: `screenshot.jpg`) |
+| `--local` | Force local Playwright even when `BROWSERLESS_URL` is set |
 | `-V, --version` | Show version number |
 | `-h, --help` | Show help |
 
@@ -207,8 +214,59 @@ a11ygarden walmart.com --markdown > report.md
 | Variable | Required? | Purpose |
 |----------|-----------|---------|
 | `OPENAI_API_KEY` | No — AI silently skips when missing | Powers AI summaries and recommendations |
+| `BROWSERLESS_URL` | No — falls back to local Playwright | Use a remote browser (e.g. Docker Browserless) for parity with the web UI |
+| `BROWSERLESS_TOKEN` | No — only needed if your Browserless instance requires auth | Appended to the WebSocket URL as `?token=` |
 
-The CLI uses a local Playwright browser — no Browserless token needed. AI analysis runs automatically when `OPENAI_API_KEY` is in your environment and degrades silently when it isn't.
+The CLI automatically loads `.env.local`, so if `BROWSERLESS_URL` is set (e.g. from `dev:browserless`), the CLI uses the same Docker browser as the web UI. Use `--local` to force local Playwright. AI analysis runs automatically when `OPENAI_API_KEY` is in your environment and degrades silently when it isn't.
+
+---
+
+## Scanning Your Local Dev Server
+
+A11y Garden is designed to scan sites you're actively building. Here's how to test your own `localhost` during development.
+
+### Option A: CLI (Simplest)
+
+The CLI runs a local Playwright browser that can reach your dev server directly — no Docker needed.
+
+```bash
+# Start your project's dev server (e.g. on port 3000)
+# Then, from the a11y-garden directory:
+npm run cli -- localhost:3000
+
+# With a screenshot for visual verification
+npm run cli -- localhost:3000 --screenshot
+
+# Export a markdown report
+npm run cli -- localhost:3000 --markdown > my-app-a11y.md
+```
+
+The CLI automatically uses `http://` for localhost URLs (no TLS).
+
+### Option B: Web UI + Browserless (Full Experience)
+
+To scan localhost from the web UI, you need the Browserless Docker container. Without it, the Next.js dev server deadlocks when asked to scan its own origin.
+
+```bash
+# Start Docker Browserless + the full dev stack in one command
+npm run dev:browserless
+```
+
+This starts a Browserless Chromium container and sets `BROWSERLESS_URL` automatically. The scanner rewrites `localhost` URLs to `host.docker.internal` so the Docker container can reach your host machine.
+
+> **Note:** Requires [Docker Desktop](https://www.docker.com/products/docker-desktop/). On Linux, the `--add-host=host.docker.internal:host-gateway` flag is included automatically in the npm script.
+
+### Parity Between CLI and Web UI
+
+When `BROWSERLESS_URL` is set in `.env.local` (which `dev:browserless` does), the CLI uses the same Docker browser as the web UI. This ensures identical scan results between both flows. Use `--local` to force the CLI to use its own local Playwright instead:
+
+```bash
+# Uses Browserless (same as web UI)
+npm run cli -- walmart.com
+
+# Forces local Playwright
+npm run cli -- walmart.com --local
+```
 
 ---
 
@@ -240,9 +298,12 @@ NEXT_PUBLIC_CONVEX_URL=https://your-deployment.convex.cloud
 # Force-enable rate limiting in local dev (for testing):
 # RATE_LIMIT_ENABLED=true
 
-# OPTIONAL: Browserless (production only — local dev uses a local Chromium)
+# OPTIONAL: Browserless
+# In production (Vercel), required for scanning (Playwright can't run in serverless).
+# In local dev, set automatically by `npm run dev:browserless` for scanning localhost.
+# The CLI also picks these up for parity with the web UI (use --local to skip).
 # BROWSERLESS_TOKEN=your-token
-# BROWSERLESS_URL=wss://custom-endpoint  (optional, overrides default)
+# BROWSERLESS_URL=ws://localhost:3001  (local Docker) or wss://custom-endpoint (cloud)
 ```
 
 **Convex dashboard variables** (add these in the [Convex dashboard](https://dashboard.convex.dev) under Settings → Environment Variables, **not** in `.env.local`):
@@ -259,7 +320,7 @@ The app is designed to degrade gracefully rather than crash:
 | Variable | Missing in dev | Missing in production |
 |----------|---------------|----------------------|
 | `NEXT_PUBLIC_CONVEX_URL` | App runs without Convex/Clerk — `/demo` still works. A banner warns that features are disabled. | Same behavior; auth and database features are unavailable. |
-| `BROWSERLESS_TOKEN` | Not needed — Playwright launches a local browser. | Scan API returns a 500 with a descriptive error message. |
+| `BROWSERLESS_TOKEN`/`URL` | Not needed — Playwright launches a local browser. Set by `dev:browserless` for localhost scanning from the web UI. | Scan API returns a 500 with a descriptive error message. |
 | `OPENAI_API_KEY` (Convex) | AI summary/recommendations are skipped with a clear error logged. | Same — scans work, but AI analysis fails gracefully. |
 | `OPENAI_API_KEY` (.env.local) | CLI skips AI summary unless `--no-ai` is passed. | N/A (CLI only). |
 | `UPSTASH_REDIS_REST_URL/TOKEN` | Rate limiting disabled — all scans allowed. | **Required** — prevents abuse via per-IP rate limits and concurrency caps. |
@@ -338,9 +399,9 @@ The app is designed to degrade gracefully rather than crash:
 ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐
 │  User    │    │Playwright│    │Screenshot│    │  OpenAI  │    │ Markdown │
 │  runs    │ ─▶ │+ axe-core│ ─▶ │+ Grade   │ ─▶ │ Summary  │ ─▶ │ Report   │
-│  CLI     │    │ (local)  │    │Calculated│    │(optional)│    │ → stdout │
-└──────────┘    └──────────┘    └──────────┘    └──────────┘    └──────────┘
-                                      │
+│  CLI     │    │(local or │    │Calculated│    │(optional)│    │ → stdout │
+└──────────┘    │Browserls)│    └──────────┘    └──────────┘    └──────────┘
+                └──────────┘          │
                                       ▼ (if --screenshot)
                                 ┌──────────┐
                                 │  JPEG    │
@@ -399,7 +460,7 @@ The algorithm version is tracked per audit, and grades are lazily recalculated w
 npm run dev              # Start Next.js + Convex together (full stack)
 npm run dev:next         # Start only Next.js — no env vars needed (try /demo)
 npm run dev:convex       # Start only Convex
-npm run dev:browserless  # Start with local Docker Browserless
+npm run dev:browserless  # Start with local Docker Browserless (needed for localhost scanning from web UI)
 npm run dev:upstash      # Start with rate limiting enabled locally
 npm run browserless      # Run the Browserless Docker container
 npm run browserless:stop # Stop the Browserless container

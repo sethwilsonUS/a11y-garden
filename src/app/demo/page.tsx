@@ -259,7 +259,9 @@ export default function DemoPage() {
 
     let normalizedUrl = url.trim();
     if (!normalizedUrl.startsWith("http://") && !normalizedUrl.startsWith("https://")) {
-      normalizedUrl = `https://${normalizedUrl}`;
+      // Use http:// for local addresses (no TLS), https:// for everything else
+      const looksLocal = /^(localhost|127\.\d+\.\d+\.\d+|\[::1\])(:\d+)?/i.test(normalizedUrl);
+      normalizedUrl = `${looksLocal ? "http" : "https"}://${normalizedUrl}`;
     }
 
     try {
@@ -271,8 +273,25 @@ export default function DemoPage() {
       return;
     }
 
+    // ---- Self-scan warning (dev only) -----------------------------------------
+    let selfScanWarning = "";
+    if (process.env.NODE_ENV === "development") {
+      try {
+        const target = new URL(normalizedUrl);
+        if (target.origin === window.location.origin) {
+          selfScanWarning =
+            "Scanning own dev server — requires Browserless (npm run dev:browserless). " +
+            "If results look wrong, use: npm run cli localhost:3000";
+        }
+      } catch {
+        // URL parsing failed — handled by earlier validation
+      }
+    }
+
     try {
-      setScanStatus("Scanning website for accessibility issues...");
+      setScanStatus(
+        selfScanWarning || "Scanning website for accessibility issues..."
+      );
 
       const response = await fetch("/api/scan", {
         method: "POST",
