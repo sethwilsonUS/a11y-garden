@@ -252,15 +252,18 @@ program
   .option("--markdown", "Output a markdown report instead of terminal format")
   .option("--json", "Output raw JSON")
   .option("--screenshot [path]", "Save a screenshot of the scanned page (default: screenshot.jpg)")
+  .option("--local", "Force local Playwright even if BROWSERLESS_URL is set")
   .action(
     async (
       rawUrl: string,
-      options: { ai: boolean; markdown: boolean; json: boolean; screenshot?: boolean | string },
+      options: { ai: boolean; markdown: boolean; json: boolean; screenshot?: boolean | string; local?: boolean },
     ) => {
       // ---- Normalize URL ----------------------------------------------------
       let url = rawUrl.trim();
       if (!/^https?:\/\//i.test(url)) {
-        url = `https://${url}`;
+        // Use http:// for local addresses (no TLS), https:// for everything else
+        const looksLocal = /^(localhost|127\.\d+\.\d+\.\d+|\[::1\])(:\d+)?/i.test(url);
+        url = `${looksLocal ? "http" : "https"}://${url}`;
       }
 
       try {
@@ -276,9 +279,25 @@ program
         console.error(chalk.green.bold("\n  🌱 A11y Garden CLI\n"));
       }
 
+      // ---- Build browser WS endpoint (mirrors API route logic) ---------------
+      // Uses BROWSERLESS_URL / BROWSERLESS_TOKEN from env (.env.local) when
+      // available, so the CLI produces identical results to the web UI.
+      // --local flag skips this and forces local Playwright.
+      let browserWSEndpoint: string | undefined;
+      if (!options.local) {
+        const browserlessUrl = process.env.BROWSERLESS_URL;
+        const browserlessToken = process.env.BROWSERLESS_TOKEN;
+        if (browserlessUrl) {
+          browserWSEndpoint = browserlessToken
+            ? `${browserlessUrl}?token=${browserlessToken}`
+            : browserlessUrl;
+        }
+      }
+
       // ---- Scan -------------------------------------------------------------
+      const usingRemote = !!browserWSEndpoint;
       const spinner = ora({
-        text: `Scanning ${chalk.cyan(url)}...`,
+        text: `Scanning ${chalk.cyan(url)}${usingRemote ? chalk.dim(" (via Browserless)") : ""}...`,
         stream: process.stderr,
       }).start();
 
@@ -286,7 +305,10 @@ program
 
       let scanResult;
       try {
-        scanResult = await scanUrl(url, { captureScreenshot: wantsScreenshot });
+        scanResult = await scanUrl(url, {
+          captureScreenshot: wantsScreenshot,
+          browserWSEndpoint,
+        });
       } catch (error) {
         if (error instanceof ScanBlockedError) {
           spinner.fail(
@@ -330,6 +352,13 @@ program
         if (isTTY) {
           console.error(chalk.yellow("  ⚠ Screenshot capture failed\n"));
         }
+      }
+
+      // Warn if screenshot appears blank (page may not have rendered)
+      if (wantsScreenshot && scanResult.screenshotWarning && isTTY) {
+        console.error(
+          chalk.yellow(`  ⚠ ${scanResult.screenshotWarning}\n`),
+        );
       }
 
       // ---- Grade ------------------------------------------------------------

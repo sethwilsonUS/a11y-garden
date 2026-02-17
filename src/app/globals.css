@@ -23,15 +23,15 @@
   --text-muted: #516247;
   --border-color: #d4d1c7;
 
-  /* Accent — emerald */
-  --accent: #047857;
+  /* Accent — emerald (darkened from #047857 for reliable 4.5:1 contrast on accent-bg) */
+  --accent: #036B4A;
   --accent-hover: #065f46;
   --accent-bg: rgba(4, 120, 87, 0.08);
   --accent-border: rgba(4, 120, 87, 0.25);
   --accent-glow: rgba(4, 120, 87, 0.10);
 
   /* Button surfaces */
-  --btn-primary-bg: #047857;
+  --btn-primary-bg: #036B4A;
   --btn-primary-hover: #065f46;
   --btn-primary-text: #ffffff;
 
@@ -42,7 +42,7 @@
   --severity-serious: #c2410c;
   --severity-serious-bg: rgba(194, 65, 12, 0.08);
   --severity-serious-border: rgba(194, 65, 12, 0.25);
-  --severity-moderate: #a16207;
+  --severity-moderate: #8a5300;
   --severity-moderate-bg: rgba(161, 98, 7, 0.08);
   --severity-moderate-border: rgba(161, 98, 7, 0.25);
   --severity-minor: #1d4ed8;
@@ -50,9 +50,9 @@
   --severity-minor-border: rgba(29, 78, 216, 0.25);
 
   /* Grade colors — light */
-  --grade-a: #047857;
+  --grade-a: #036B4A;
   --grade-b: #1d4ed8;
-  --grade-c: #a16207;
+  --grade-c: #8a5300;
   --grade-d: #c2410c;
   --grade-f: #dc2626;
 

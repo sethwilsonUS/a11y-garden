@@ -55,6 +55,29 @@ export function ScanForm() {
       return;
     }
 
+    // ---- Self-scan warning (dev only) -----------------------------------------
+    // In development without a remote browser (Browserless), the Next.js dev
+    // server can deadlock when asked to scan its own origin. With Browserless,
+    // the Docker URL rewriting makes it work. We show a warning but allow the
+    // scan — if Browserless is configured it'll succeed, otherwise the user will
+    // see visibly wrong results and know to use the CLI.
+    let isSelfScanInDev = false;
+    if (process.env.NODE_ENV === "development") {
+      try {
+        const target = new URL(normalizedUrl);
+        isSelfScanInDev = target.origin === window.location.origin;
+      } catch {
+        // URL parsing failed — handled by earlier validation
+      }
+    }
+
+    if (isSelfScanInDev) {
+      setScanStatus(
+        "Scanning own dev server — requires Browserless (npm run dev:browserless). " +
+        "If results look wrong, use: npm run cli localhost:3000"
+      );
+    }
+
     let auditId: Id<"audits"> | null = null;
 
     try {
@@ -102,6 +125,11 @@ export function ScanForm() {
         url: normalizedUrl,
         isPublic,
       });
+
+      // Warn in console if the screenshot appears blank (dev/debugging aid)
+      if (scanResult.screenshotWarning) {
+        console.warn("[A11y Garden]", scanResult.screenshotWarning);
+      }
 
       // Step 3: Upload screenshot to Convex file storage (if available)
       let screenshotId: Id<"_storage"> | undefined;
