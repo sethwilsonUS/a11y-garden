@@ -1,4 +1,7 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+import { NextResponse } from "next/server";
+
+const isLocalMode = process.env.NEXT_PUBLIC_LOCAL_MODE === "true";
 
 const isPublicRoute = createRouteMatcher([
   "/",
@@ -11,6 +14,14 @@ const isPublicRoute = createRouteMatcher([
 ]);
 
 export default clerkMiddleware(async (auth, request) => {
+  // In local mode, redirect root to the demo page and skip all auth.
+  if (isLocalMode) {
+    if (request.nextUrl.pathname === "/") {
+      return NextResponse.redirect(new URL("/demo", request.url));
+    }
+    return;
+  }
+
   if (!isPublicRoute(request)) {
     await auth.protect();
   }

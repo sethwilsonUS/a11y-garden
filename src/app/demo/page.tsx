@@ -37,6 +37,8 @@ interface ScanResult {
   rawViolations: string;
   safeMode?: boolean;
   scannedAt: number;
+  aiSummary?: string;
+  topIssues?: string[];
 }
 
 // Severity config using CSS vars
@@ -305,7 +307,7 @@ export default function DemoPage() {
         throw new Error(scanResult.error || "Scan failed");
       }
 
-      setResult({
+      const scanData: ScanResult = {
         url: normalizedUrl,
         pageTitle: scanResult.pageTitle || undefined,
         violations: scanResult.violations,
@@ -314,7 +316,34 @@ export default function DemoPage() {
         rawViolations: scanResult.rawViolations,
         safeMode: scanResult.safeMode,
         scannedAt: Date.now(),
-      });
+      };
+
+      setResult(scanData);
+
+      // ---- AI summary (best-effort) -----------------------------------------
+      // If the user has OPENAI_API_KEY in .env.local the Next.js server can
+      // generate an AI summary locally — same path the CLI uses. When the key
+      // isn't set the endpoint returns 501 and we silently degrade.
+      if (scanResult.violations.total > 0) {
+        try {
+          setScanStatus("Generating AI summary...");
+          const aiRes = await fetch("/api/ai-summary", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ rawViolations: scanResult.rawViolations }),
+          });
+
+          if (aiRes.ok) {
+            const aiData = await aiRes.json();
+            setResult((prev) =>
+              prev ? { ...prev, aiSummary: aiData.summary, topIssues: aiData.topIssues } : prev,
+            );
+          }
+          // Non-ok (501 = no key, 500 = error) — silently degrade
+        } catch {
+          // Network error — silently degrade
+        }
+      }
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : "Failed to scan website";
       setError(errorMessage);
@@ -428,7 +457,7 @@ export default function DemoPage() {
                   </p>
                   <ul className="list-disc list-inside space-y-1 text-theme-muted">
                     <li>Results are not saved to the database</li>
-                    <li>AI-powered summaries are not available</li>
+                    <li>AI summaries require <code className="text-xs bg-theme-tertiary px-1.5 py-0.5 rounded font-mono">OPENAI_API_KEY</code> in <code className="text-xs bg-theme-tertiary px-1.5 py-0.5 rounded font-mono">.env.local</code></li>
                     <li>No account history or dashboard</li>
                   </ul>
                   <p className="mt-3">
@@ -517,7 +546,7 @@ export default function DemoPage() {
               <ViolationCard violations={result.violations} />
             </section>
 
-            {/* Demo mode notice for AI */}
+            {/* AI Summary — real results when OPENAI_API_KEY is set locally */}
             <section className="garden-bed p-6">
               <div className="flex items-start gap-4">
                 <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-theme-tertiary flex items-center justify-center">
@@ -525,15 +554,43 @@ export default function DemoPage() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
                   </svg>
                 </div>
-                <div>
+                <div className="flex-1">
                   <h3 className="text-lg font-display font-semibold text-theme-primary mb-2">AI Summary</h3>
-                  <p className="text-theme-muted">
-                    AI-powered insights and plain-English explanations are available with a free account.{" "}
-                    <Link href="/sign-up" className="text-accent hover:underline transition-colors">
-                      Sign up
-                    </Link>{" "}
-                    to get personalized recommendations for nurturing these issues.
-                  </p>
+                  {result.aiSummary ? (
+                    <>
+                      <p className="text-theme-secondary leading-relaxed">
+                        {result.aiSummary}
+                      </p>
+                      {result.topIssues && result.topIssues.length > 0 && (
+                        <div className="mt-4">
+                          <h4 className="text-sm font-semibold text-theme-primary mb-2">Top Issues</h4>
+                          <ol className="list-decimal list-inside space-y-1 text-theme-secondary text-sm">
+                            {result.topIssues.map((issue, i) => (
+                              <li key={i}>{issue}</li>
+                            ))}
+                          </ol>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <p className="text-theme-muted">
+                      Add your{" "}
+                      <code className="text-xs bg-theme-tertiary px-1.5 py-0.5 rounded font-mono">OPENAI_API_KEY</code>{" "}
+                      to{" "}
+                      <code className="text-xs bg-theme-tertiary px-1.5 py-0.5 rounded font-mono">.env.local</code>{" "}
+                      to unlock AI-powered summaries and plain-English explanations.
+                      Get a key at{" "}
+                      <a
+                        href="https://platform.openai.com/api-keys"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-accent hover:underline transition-colors"
+                      >
+                        platform.openai.com
+                      </a>
+                      , then restart the dev server.
+                    </p>
+                  )}
                 </div>
               </div>
             </section>
