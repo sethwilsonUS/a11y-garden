@@ -16,6 +16,7 @@
     "build": "convex deploy --cmd 'next build'",
     "start": "next start",
     "lint": "eslint",
+    "local": "NEXT_PUBLIC_LOCAL_MODE=true next dev",
     "cli": "node --import tsx cli/index.ts",
     "test": "vitest",
     "test:run": "vitest run",

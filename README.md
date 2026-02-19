@@ -71,80 +71,30 @@ A friendly accessibility audit tool that provides AI insights and specific, acti
 
 ## Quick Start
 
-### Option 1: Demo Mode (Zero Config)
-
-Want to try the core scanning functionality without any API keys or accounts? The app
-gracefully degrades when environment variables are missing — auth, database, and AI
-features are disabled, but the `/demo` scanner works out of the box.
-
 ```bash
-# Clone the repository
 git clone https://github.com/sethwilsonUS/a11y-garden.git
 cd a11y-garden
-
-# Install dependencies
 npm install
-
-# Install Playwright browser
 npx playwright install chromium
-
-# Start the app (no .env.local needed)
-npm run dev:next
+npm run local
 ```
 
-Then visit **http://localhost:3000/demo** to scan websites. A banner at the bottom of the
-page will remind you that environment variables are missing. Demo mode runs scans locally
-and displays results immediately, but doesn't save them or provide AI summaries.
+Open **http://localhost:3000** and start scanning. That's it — no accounts, no API keys, no external services.
 
-### Option 2: Full Setup (All Features)
+### Optional: Add AI Summaries
 
-For the complete experience with saved audits, AI insights, and user accounts:
+Add an [OpenAI key](https://platform.openai.com/api-keys) to unlock AI-powered analysis:
 
-#### Prerequisites
+```bash
+echo "OPENAI_API_KEY=sk-..." >> .env.local
+# Then restart: npm run local
+```
 
-- Node.js 18+
-- Accounts for: [Convex](https://convex.dev), [Clerk](https://clerk.com), [OpenAI](https://openai.com)
+This is the same key the [CLI](#cli-usage) uses. When it's missing, AI features are silently skipped.
 
-#### Installation
+### Want the Full Web Experience?
 
-1. **Clone and install**
-   ```bash
-   git clone https://github.com/sethwilsonUS/a11y-garden.git
-   cd a11y-garden
-   npm install
-   ```
-
-2. **Set up environment variables**
-   ```bash
-   cp env.example .env.local
-   ```
-   
-   Fill in your API keys (see [Environment Variables](#environment-variables) below).
-
-3. **Initialize Convex**
-   ```bash
-   npx convex dev
-   ```
-   
-   This creates your Convex project and deploys the schema. Keep this running.
-
-4. **Add OpenAI key to Convex**
-   
-   In the [Convex dashboard](https://dashboard.convex.dev), go to **Settings → Environment Variables** and add:
-   - `OPENAI_API_KEY` — Your OpenAI API key
-
-5. **Install Playwright browser**
-   ```bash
-   npx playwright install chromium
-   ```
-
-6. **Start development**
-   ```bash
-   # In a new terminal (keep Convex running)
-   npm run dev
-   ```
-
-7. Open **http://localhost:3000**
+For saved audits, user accounts, the community database, and AI via Convex — see [Full Development Setup](#full-development-setup) below.
 
 ---
 
@@ -270,6 +220,58 @@ npm run cli -- walmart.com --local
 
 ---
 
+## Full Development Setup
+
+Working on the full web app with saved audits, user accounts, community database, and AI? You'll need accounts for [Convex](https://convex.dev), [Clerk](https://clerk.com), and [OpenAI](https://openai.com).
+
+### Prerequisites
+
+- Node.js 18+
+- Accounts for: [Convex](https://convex.dev), [Clerk](https://clerk.com), [OpenAI](https://openai.com)
+
+### Installation
+
+1. **Clone and install**
+   ```bash
+   git clone https://github.com/sethwilsonUS/a11y-garden.git
+   cd a11y-garden
+   npm install
+   ```
+
+2. **Set up environment variables**
+   ```bash
+   cp env.example .env.local
+   ```
+   
+   Fill in your API keys (see [Environment Variables](#environment-variables) below).
+
+3. **Initialize Convex**
+   ```bash
+   npx convex dev
+   ```
+   
+   This creates your Convex project and deploys the schema. Keep this running.
+
+4. **Add OpenAI key to Convex**
+   
+   In the [Convex dashboard](https://dashboard.convex.dev), go to **Settings → Environment Variables** and add:
+   - `OPENAI_API_KEY` — Your OpenAI API key
+
+5. **Install Playwright browser**
+   ```bash
+   npx playwright install chromium
+   ```
+
+6. **Start development**
+   ```bash
+   # In a new terminal (keep Convex running)
+   npm run dev
+   ```
+
+7. Open **http://localhost:3000**
+
+---
+
 ## Environment Variables
 
 Copy `env.example` to `.env.local` and fill in the values:
@@ -285,8 +287,8 @@ NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
 CONVEX_DEPLOYMENT=dev:your-deployment-name
 NEXT_PUBLIC_CONVEX_URL=https://your-deployment.convex.cloud
 
-# OpenAI (optional — used by the CLI for AI summaries)
-# The web app reads OPENAI_API_KEY from the Convex dashboard instead.
+# OpenAI (optional — used by the CLI and local mode for AI summaries)
+# The full web app reads OPENAI_API_KEY from the Convex dashboard instead.
 # OPENAI_API_KEY=sk-...
 
 # Upstash Redis — rate limiting & concurrency (https://console.upstash.com)
@@ -319,10 +321,10 @@ The app is designed to degrade gracefully rather than crash:
 
 | Variable | Missing in dev | Missing in production |
 |----------|---------------|----------------------|
-| `NEXT_PUBLIC_CONVEX_URL` | App runs without Convex/Clerk — `/demo` still works. A banner warns that features are disabled. | Same behavior; auth and database features are unavailable. |
+| `NEXT_PUBLIC_CONVEX_URL` | App runs without Convex/Clerk — `/demo` still works. A banner warns unless running in local mode (`npm run local`). | Same behavior; auth and database features are unavailable. |
 | `BROWSERLESS_TOKEN`/`URL` | Not needed — Playwright launches a local browser. Set by `dev:browserless` for localhost scanning from the web UI. | Scan API returns a 500 with a descriptive error message. |
 | `OPENAI_API_KEY` (Convex) | AI summary/recommendations are skipped with a clear error logged. | Same — scans work, but AI analysis fails gracefully. |
-| `OPENAI_API_KEY` (.env.local) | CLI skips AI summary unless `--no-ai` is passed. | N/A (CLI only). |
+| `OPENAI_API_KEY` (.env.local) | CLI and local mode skip AI summary when missing. | N/A (CLI / local mode only). |
 | `UPSTASH_REDIS_REST_URL/TOKEN` | Rate limiting disabled — all scans allowed. | **Required** — prevents abuse via per-IP rate limits and concurrency caps. |
 | `RATE_LIMIT_ENABLED` | Rate limiting stays off (default). Set to `true` to test locally. | Not needed — rate limiting is always on when Upstash vars are present. |
 
@@ -352,7 +354,9 @@ The app is designed to degrade gracefully rather than crash:
 │   │   ├── dashboard/        # User dashboard (auth required)
 │   │   ├── sign-in/          # Clerk sign-in page
 │   │   ├── sign-up/          # Clerk sign-up page
-│   │   └── api/scan/         # Scan API (delegates to shared scanner)
+│   │   └── api/
+│   │       ├── scan/          # Scan API (delegates to shared scanner)
+│   │       └── ai-summary/    # AI summary API (local mode + demo)
 │   ├── components/
 │   │   ├── ErrorBoundary.tsx      # Global React error boundary
 │   │   ├── ScanForm.tsx           # URL input + scan orchestration
@@ -364,7 +368,8 @@ The app is designed to degrade gracefully rather than crash:
 │   └── lib/
 │       ├── scanner.ts        # Shared scan engine (Playwright + axe-core)
 │       ├── report.ts         # Shared markdown report generator
-│       ├── ai-summary.ts     # Standalone OpenAI integration (CLI)
+│       ├── mode.ts           # Local vs. web mode detection
+│       ├── ai-summary.ts     # Standalone OpenAI integration (CLI + local mode)
 │       ├── grading.ts        # Client-side grading (mirrors Convex)
 │       ├── rate-limit.ts     # Upstash rate limiting & concurrency
 │       └── url-validator.ts  # SSRF-safe URL validation
@@ -457,8 +462,9 @@ The algorithm version is tracked per audit, and grades are lazily recalculated w
 ## Scripts
 
 ```bash
+npm run local            # Local mode — just scanning + optional AI (no accounts/database)
 npm run dev              # Start Next.js + Convex together (full stack)
-npm run dev:next         # Start only Next.js — no env vars needed (try /demo)
+npm run dev:next         # Start only Next.js (no local-mode redirects)
 npm run dev:convex       # Start only Convex
 npm run dev:browserless  # Start with local Docker Browserless (needed for localhost scanning from web UI)
 npm run dev:upstash      # Start with rate limiting enabled locally

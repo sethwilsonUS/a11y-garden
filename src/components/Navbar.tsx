@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { SignInButton, SignUpButton, UserButton, useAuth } from "@clerk/nextjs";
 import { ThemeToggle } from "./ThemeToggle";
 import { getNavLinks } from "@/lib/nav-links";
+import { isLocalMode } from "@/lib/mode";
 
 function LeafLogo({ className }: { className?: string }) {
   return (
@@ -31,9 +32,69 @@ function LeafLogo({ className }: { className?: string }) {
   );
 }
 
-export function Navbar() {
+/**
+ * Clerk auth controls — only mounted when the full web stack is configured.
+ * Kept as a separate component so `useAuth()` is never called outside a
+ * ClerkProvider (which is absent in local mode).
+ */
+function AuthControls() {
   const pathname = usePathname();
   const { isSignedIn, isLoaded } = useAuth();
+
+  const isActive = (href: string) => pathname.startsWith(href);
+
+  if (!isLoaded) {
+    return (
+      <div
+        className="w-8 h-8 rounded-full bg-theme-tertiary animate-pulse"
+        aria-label="Loading authentication"
+      />
+    );
+  }
+
+  if (isSignedIn) {
+    return (
+      <>
+        <Link
+          href="/dashboard"
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+            isActive("/dashboard")
+              ? "bg-[var(--accent-bg)] text-accent font-semibold"
+              : "text-theme-secondary hover:text-theme-primary hover:bg-theme-tertiary"
+          }`}
+          aria-current={isActive("/dashboard") ? "page" : undefined}
+        >
+          Dashboard
+        </Link>
+        <UserButton
+          appearance={{
+            elements: {
+              avatarBox: "w-9 h-9",
+            },
+          }}
+        />
+      </>
+    );
+  }
+
+  return (
+    <>
+      <SignInButton mode="modal">
+        <button className="px-4 py-2 rounded-lg text-sm font-medium text-theme-secondary hover:text-theme-primary hover:bg-theme-tertiary transition-all duration-200 cursor-pointer">
+          Sign In
+        </button>
+      </SignInButton>
+      <SignUpButton mode="modal">
+        <button className="btn-primary text-sm py-2 cursor-pointer">
+          Sign Up
+        </button>
+      </SignUpButton>
+    </>
+  );
+}
+
+export function Navbar() {
+  const pathname = usePathname();
 
   // Dev-only emoji prefixes for quick visual distinction in the navbar
   const devEmojis: Record<string, string> = {
@@ -89,50 +150,10 @@ export function Navbar() {
             ))}
           </ul>
 
-          {/* Auth Buttons and Theme Toggle */}
+          {/* Theme Toggle + Auth (auth only in web mode) */}
           <div className="flex items-center gap-2">
             <ThemeToggle />
-
-            {!isLoaded ? (
-              <div
-                className="w-8 h-8 rounded-full bg-theme-tertiary animate-pulse"
-                aria-label="Loading authentication"
-              />
-            ) : isSignedIn ? (
-              <>
-                <Link
-                  href="/dashboard"
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
-                    isActive("/dashboard")
-                      ? "bg-[var(--accent-bg)] text-accent font-semibold"
-                      : "text-theme-secondary hover:text-theme-primary hover:bg-theme-tertiary"
-                  }`}
-                  aria-current={isActive("/dashboard") ? "page" : undefined}
-                >
-                  Dashboard
-                </Link>
-                <UserButton
-                  appearance={{
-                    elements: {
-                      avatarBox: "w-9 h-9",
-                    },
-                  }}
-                />
-              </>
-            ) : (
-              <>
-                <SignInButton mode="modal">
-                  <button className="px-4 py-2 rounded-lg text-sm font-medium text-theme-secondary hover:text-theme-primary hover:bg-theme-tertiary transition-all duration-200 cursor-pointer">
-                    Sign In
-                  </button>
-                </SignInButton>
-                <SignUpButton mode="modal">
-                  <button className="btn-primary text-sm py-2 cursor-pointer">
-                    Sign Up
-                  </button>
-                </SignUpButton>
-              </>
-            )}
+            {!isLocalMode && <AuthControls />}
           </div>
         </div>
       </div>

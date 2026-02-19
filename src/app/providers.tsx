@@ -6,11 +6,13 @@ import { ConvexProviderWithClerk } from "convex/react-clerk";
 import { ConvexReactClient } from "convex/react";
 import { dark } from "@clerk/themes";
 import { useTheme } from "@/components/ThemeProvider";
+import { isLocalMode } from "@/lib/mode";
 
 // ---------------------------------------------------------------------------
 // Graceful degradation: when Convex/Clerk env vars are missing we skip the
 // providers entirely so the /demo page (and the scan API) can still work.
-// A persistent banner warns the developer that the full stack isn't active.
+// In local mode (npm run local) this is intentional and no banner is shown.
+// Otherwise a persistent banner warns the developer.
 // ---------------------------------------------------------------------------
 
 const CONVEX_URL = process.env.NEXT_PUBLIC_CONVEX_URL;
@@ -81,7 +83,8 @@ export function Providers({ children }: { children: ReactNode }) {
     return (
       <>
         {children}
-        <MissingEnvBanner />
+        {/* In local mode the missing vars are intentional — no warning needed */}
+        {!isLocalMode && <MissingEnvBanner />}
       </>
     );
   }
