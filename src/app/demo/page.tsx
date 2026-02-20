@@ -388,14 +388,19 @@ export default function DemoPage() {
             </p>
 
             {/* Scan Form */}
-            <form onSubmit={handleSubmit} className="garden-bed p-6 shadow-lg">
+            <form onSubmit={handleSubmit} noValidate className="garden-bed p-6 shadow-lg">
               <label htmlFor="demo-url" className="block text-sm font-semibold mb-2 text-theme-primary">
                 Website URL
               </label>
               <div className="flex gap-3">
                 <input
-                  type="text"
+                  type="url"
                   id="demo-url"
+                  inputMode="url"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  autoComplete="url"
+                  spellCheck={false}
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}
                   placeholder="example.com"

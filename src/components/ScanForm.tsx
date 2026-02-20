@@ -192,7 +192,7 @@ export function ScanForm() {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="max-w-2xl mx-auto space-y-6">
+    <form onSubmit={handleSubmit} noValidate className="max-w-2xl mx-auto space-y-6">
       <div>
         <label
           htmlFor="url"
@@ -202,8 +202,13 @@ export function ScanForm() {
         </label>
         <div className="relative">
           <input
-            type="text"
+            type="url"
             id="url"
+            inputMode="url"
+            autoCapitalize="off"
+            autoCorrect="off"
+            autoComplete="url"
+            spellCheck={false}
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             placeholder="example.com or https://example.com"

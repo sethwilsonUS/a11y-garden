@@ -537,7 +537,7 @@ export default function ResultsPage({
               </p>
             </div>
 
-            <div className="flex flex-col items-end gap-2">
+            <div className="flex flex-col items-center lg:items-end gap-2">
               <GradeBadge
                 grade={audit.letterGrade}
                 score={audit.score}
