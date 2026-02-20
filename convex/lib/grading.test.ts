@@ -71,8 +71,8 @@ describe("calculateGrade", () => {
 
       const result = calculateGrade(violations);
 
-      // 100 - (1 * 12) = 88, but capped at 72 due to hard cap
-      expect(result.score).toBe(72);
+      // 100 - (1 * 12) = 88, but capped at 79 due to hard cap
+      expect(result.score).toBe(79);
       expect(result.grade).toBe("C");
     });
 
@@ -175,8 +175,8 @@ describe("calculateGrade", () => {
       });
     });
 
-    describe("serious violations → max C grade (score ≤72)", () => {
-      it("caps score at 72 with 1 serious violation", () => {
+    describe("serious violations → max C grade (score ≤79)", () => {
+      it("caps score at 79 with 1 serious violation", () => {
         const violations: ViolationCounts = {
           critical: 0,
           serious: 1,
@@ -186,13 +186,13 @@ describe("calculateGrade", () => {
 
         const result = calculateGrade(violations);
 
-        expect(result.score).toBe(72);
+        expect(result.score).toBe(79);
         expect(result.grade).toBe("C");
       });
 
-      it("caps score at 72 even with minimal penalty", () => {
+      it("caps score at 79 even with minimal penalty", () => {
         // 1 serious = 12 penalty, raw score = 88
-        // Hard cap brings it to 72
+        // Hard cap brings it to 79
         const violations: ViolationCounts = {
           critical: 0,
           serious: 1,
@@ -202,7 +202,7 @@ describe("calculateGrade", () => {
 
         const result = calculateGrade(violations);
 
-        expect(result.score).toBe(72);
+        expect(result.score).toBe(79);
       });
 
       it("uses penalty score when lower than cap", () => {
@@ -293,8 +293,8 @@ describe("calculateGrade", () => {
 
         const result = calculateGrade(violations);
 
-        // Serious cap (72) takes precedence over moderate cap (85)
-        expect(result.score).toBeLessThanOrEqual(72);
+        // Serious cap (79) takes precedence over moderate cap (85)
+        expect(result.score).toBeLessThanOrEqual(79);
       });
     });
   });
@@ -329,7 +329,7 @@ describe("calculateGrade", () => {
     });
 
     it("returns C for score 70-79", () => {
-      // 1 serious, capped at 72
+      // 1 serious, capped at 79
       const violations: ViolationCounts = {
         critical: 0,
         serious: 1,
@@ -341,8 +341,7 @@ describe("calculateGrade", () => {
     });
 
     it("returns D for score 60-69", () => {
-      // 2 serious = 24 penalty, but capped at 72 due to serious
-      // Actually let's use a different combination
+      // 3 serious = 36 penalty = score 64, below 79 cap
       // 100 - 36 = 64
       const violations: ViolationCounts = {
         critical: 0,
@@ -582,8 +581,8 @@ describe("calculateGrade", () => {
       expect(GRADING_VERSION).toBeGreaterThan(0);
     });
 
-    it("current version is 2", () => {
-      expect(GRADING_VERSION).toBe(2);
+    it("current version is 3", () => {
+      expect(GRADING_VERSION).toBe(3);
     });
   });
 });

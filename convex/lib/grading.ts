@@ -1,5 +1,5 @@
 /**
- * Grading Algorithm v2 - Hybrid Approach
+ * Grading Algorithm v3 - Hybrid Approach
  * 
  * Single source of truth for grading logic.
  * Used by both Convex functions and Next.js app.
@@ -9,7 +9,7 @@
  */
 
 // Increment this when changing the algorithm to trigger lazy recalculation
-export const GRADING_VERSION = 2;
+export const GRADING_VERSION = 3;
 
 export interface ViolationCounts {
   critical: number;
@@ -52,9 +52,9 @@ export function calculateGrade(violations: ViolationCounts): GradeResult {
   if (violations.critical > 0) {
     score = Math.min(score, 55);
   }
-  // Serious issues: max grade C (score capped at 72)
+  // Serious issues: max grade C (capped to top of C range so penalties still differentiate)
   else if (violations.serious > 0) {
-    score = Math.min(score, 72);
+    score = Math.min(score, 79);
   }
   // 3+ moderate issues: max grade B (score capped at 85)
   else if (violations.moderate >= 3) {
