@@ -8,7 +8,9 @@ import { ViolationCard } from "@/components/ViolationCard";
 import { StatusIndicator } from "@/components/StatusIndicator";
 import { calculateGrade, GRADING_VERSION } from "@/lib/grading";
 import { generateMarkdownReport, type AxeViolation, type ReportData } from "@/lib/report";
+import { buildResultsUrl, parseResultsSegments } from "@/lib/urls";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { use, useEffect, useRef, useState, useCallback } from "react";
 import { SafeModeModal } from "@/components/SafeModeModal";
 import { ScreenshotSection } from "@/components/ScreenshotSection";
@@ -311,7 +313,7 @@ function AuditHistoryTimeline({
 
                 {/* Audit info */}
                 <Link
-                  href={`/results/${pastAudit._id}`}
+                  href={buildResultsUrl(pastAudit.url, pastAudit.scannedAt, pastAudit._id)}
                   className="flex-1 flex items-center justify-between py-2 group"
                 >
                   <div>
@@ -345,16 +347,29 @@ function AuditHistoryTimeline({
 export default function ResultsPage({
   params,
 }: {
-  params: Promise<{ auditId: string }>;
+  params: Promise<{ segments: string[] }>;
 }) {
-  const { auditId } = use(params);
+  const { segments } = use(params);
+  const { auditId, isLegacy } = parseResultsSegments(segments);
+  const router = useRouter();
+
   const audit = useQuery(api.audits.getAudit, {
     auditId: auditId as Id<"audits">,
   });
   const recalculateGrade = useMutation(api.audits.recalculateGrade);
   const hasRecalculated = useRef(false);
+  const hasRedirected = useRef(false);
   const [safeModeOpen, setSafeModeOpen] = useState(false);
   const closeSafeMode = useCallback(() => setSafeModeOpen(false), []);
+
+  // Silently upgrade legacy URLs to the pretty format once audit data loads
+  useEffect(() => {
+    if (isLegacy && audit && !hasRedirected.current) {
+      hasRedirected.current = true;
+      const prettyUrl = buildResultsUrl(audit.url, audit.scannedAt, audit._id);
+      router.replace(prettyUrl);
+    }
+  }, [isLegacy, audit, router]);
 
   // Lazy recalculation: update grade if using outdated algorithm
   useEffect(() => {

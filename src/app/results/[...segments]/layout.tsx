@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../../../convex/_generated/api";
 import { Id } from "../../../../convex/_generated/dataModel";
+import { parseResultsSegments } from "@/lib/urls";
 
 // ---------------------------------------------------------------------------
 // Dynamic OG metadata for results pages.
@@ -11,8 +12,9 @@ import { Id } from "../../../../convex/_generated/dataModel";
 // previews show "Accessibility Report for [Site Title]" instead of
 // the generic site title.
 //
-// The companion opengraph-image.tsx in this directory generates a dynamic
-// branded OG image (handled automatically by Next.js file convention).
+// The OG image is served by the API route at /api/og/[auditId] and
+// referenced explicitly via openGraph.images below (the file-convention
+// opengraph-image.tsx doesn't work inside catch-all routes).
 // ---------------------------------------------------------------------------
 
 const CONVEX_URL = process.env.NEXT_PUBLIC_CONVEX_URL;
@@ -20,9 +22,10 @@ const CONVEX_URL = process.env.NEXT_PUBLIC_CONVEX_URL;
 export async function generateMetadata({
   params,
 }: {
-  params: Promise<{ auditId: string }>;
+  params: Promise<{ segments: string[] }>;
 }): Promise<Metadata> {
-  const { auditId } = await params;
+  const { segments } = await params;
+  const { auditId } = parseResultsSegments(segments);
 
   if (!CONVEX_URL) {
     return { title: "Accessibility Report | A11y Garden" };
@@ -47,6 +50,8 @@ export async function generateMetadata({
         ? `Scanned ${audit.domain} and found ${audit.violations.total} accessibility ${issueWord}. View the full report on A11y Garden.`
         : `Accessibility scan for ${audit.domain} in progress. View results on A11y Garden.`;
 
+    const ogImageUrl = `/api/og/${auditId}`;
+
     return {
       title: `${title} | A11y Garden`,
       description,
@@ -55,11 +60,20 @@ export async function generateMetadata({
         description,
         type: "article",
         siteName: "A11y Garden",
+        images: [
+          {
+            url: ogImageUrl,
+            width: 1200,
+            height: 630,
+            alt: `Accessibility Report for ${siteTitle} — A11y Garden`,
+          },
+        ],
       },
       twitter: {
         card: "summary_large_image",
         title,
         description,
+        images: [ogImageUrl],
       },
     };
   } catch {

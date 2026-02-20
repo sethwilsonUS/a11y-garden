@@ -1,7 +1,7 @@
 import { ImageResponse } from "next/og";
 import { ConvexHttpClient } from "convex/browser";
-import { api } from "../../../../convex/_generated/api";
-import { Id } from "../../../../convex/_generated/dataModel";
+import { api } from "../../../../../convex/_generated/api";
+import { Id } from "../../../../../convex/_generated/dataModel";
 
 // ---------------------------------------------------------------------------
 // Dynamic OG image for results pages.
@@ -13,21 +13,18 @@ import { Id } from "../../../../convex/_generated/dataModel";
 //  - Issue count (tasteful, no grade to avoid public shaming)
 //  - A small screenshot thumbnail when available
 //
-// Next.js automatically wires this into <meta property="og:image" />
-// via the opengraph-image.tsx file convention.
+// Served as an API route at /api/og/[auditId] and referenced from the
+// results layout via openGraph.images in generateMetadata().
 // ---------------------------------------------------------------------------
 
-export const alt = "Accessibility Report — A11y Garden";
-export const size = { width: 1200, height: 630 };
-export const contentType = "image/png";
+const size = { width: 1200, height: 630 };
 
 const CONVEX_URL = process.env.NEXT_PUBLIC_CONVEX_URL;
 
-export default async function Image({
-  params,
-}: {
-  params: Promise<{ auditId: string }>;
-}) {
+export async function GET(
+  _request: Request,
+  { params }: { params: Promise<{ auditId: string }> },
+) {
   const { auditId } = await params;
 
   let siteTitle = "Unknown Site";
