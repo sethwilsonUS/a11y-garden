@@ -16,11 +16,11 @@ const isRateLimitEnabled =
 
 const redis = isRateLimitEnabled ? Redis.fromEnv() : null;
 
-// Per-IP rate limiter: 5 scans per hour, sliding window
+// Per-IP rate limiter: 20 scans per hour, sliding window
 const ratelimit = redis
   ? new Ratelimit({
       redis,
-      limiter: Ratelimit.slidingWindow(5, "1 h"),
+      limiter: Ratelimit.slidingWindow(20, "1 h"),
       prefix: "scan-ratelimit",
       analytics: true,
     })
