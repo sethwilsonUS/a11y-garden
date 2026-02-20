@@ -24,7 +24,8 @@ const gradeIndicators = {
 
 const sizeStyles = {
   sm: {
-    container: "px-4 py-2",
+    container: "px-3 py-2",
+    gap: "gap-2",
     grade: "text-2xl",
     label: "text-xs",
     score: "text-xs",
@@ -32,6 +33,7 @@ const sizeStyles = {
   },
   md: {
     container: "px-6 py-4",
+    gap: "gap-4",
     grade: "text-5xl",
     label: "text-sm",
     score: "text-xs",
@@ -39,6 +41,7 @@ const sizeStyles = {
   },
   lg: {
     container: "px-8 py-6",
+    gap: "gap-4",
     grade: "text-7xl",
     label: "text-base",
     score: "text-sm",
@@ -51,7 +54,7 @@ export function GradeBadge({ grade, score, size = "md" }: GradeBadgeProps) {
 
   return (
     <div
-      className={`inline-flex items-center gap-4 ${sizeStyle.container} rounded-2xl border-2 bg-[var(--accent-bg)] border-[var(--accent-border)] shadow-lg`}
+      className={`inline-flex items-center ${sizeStyle.gap} ${sizeStyle.container} rounded-2xl border-2 bg-[var(--accent-bg)] border-[var(--accent-border)] shadow-lg`}
       role="status"
       aria-label={`Accessibility grade: ${grade} — ${gradeLabels[grade]} — Score: ${score} out of 100`}
     >

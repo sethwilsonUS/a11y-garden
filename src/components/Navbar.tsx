@@ -80,12 +80,12 @@ function AuthControls() {
   return (
     <>
       <SignInButton mode="modal">
-        <button className="px-4 py-2 rounded-lg text-sm font-medium text-theme-secondary hover:text-theme-primary hover:bg-theme-tertiary transition-all duration-200 cursor-pointer">
+        <button className="px-3 sm:px-4 py-2 rounded-lg text-sm font-medium text-theme-secondary hover:text-theme-primary hover:bg-theme-tertiary transition-all duration-200 cursor-pointer whitespace-nowrap">
           Sign In
         </button>
       </SignInButton>
       <SignUpButton mode="modal">
-        <button className="btn-primary text-sm py-2 cursor-pointer">
+        <button className="btn-primary text-sm py-2 cursor-pointer whitespace-nowrap">
           Sign Up
         </button>
       </SignUpButton>
@@ -132,12 +132,12 @@ export function Navbar() {
           </Link>
 
           {/* Navigation Links */}
-          <ul className="flex items-center gap-1 list-none m-0 p-0">
+          <ul className="flex items-center gap-0.5 sm:gap-1 list-none m-0 p-0">
             {navLinks.map((link) => (
               <li key={link.href}>
                 <Link
                   href={link.href}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+                  className={`px-3 sm:px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 whitespace-nowrap ${
                     isActive(link.href)
                       ? "bg-[var(--accent-bg)] text-accent font-semibold"
                       : "text-theme-secondary hover:text-theme-primary hover:bg-theme-tertiary"
@@ -151,7 +151,7 @@ export function Navbar() {
           </ul>
 
           {/* Theme Toggle + Auth (auth only in web mode) */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 sm:gap-2">
             <ThemeToggle />
             {!isLocalMode && <AuthControls />}
           </div>
