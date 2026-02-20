@@ -50,7 +50,7 @@ export function AuditCard({ audit }: AuditCardProps) {
       href={`/results/${audit._id}`}
       className="block group"
     >
-      <div className="garden-bed p-5 transition-all duration-200">
+      <div className="garden-bed p-4 sm:p-5 transition-all duration-200 overflow-hidden">
         <div className="flex items-start justify-between gap-3 sm:gap-4">
           <div className="flex-1 min-w-0">
             <h3 className="font-display font-semibold text-theme-primary truncate group-hover:text-accent transition-colors">
@@ -85,17 +85,15 @@ export function AuditCard({ audit }: AuditCardProps) {
             </div>
           </div>
 
-          <div className="flex-shrink-0">
-            {isComplete ? (
-              <GradeBadge grade={displayGrade} score={displayScore} size="sm" />
-            ) : (
-              <div className="px-3 py-2 rounded-lg bg-theme-tertiary border border-theme">
-                <span className="text-sm text-theme-secondary capitalize">
-                  {audit.status}
-                </span>
-              </div>
-            )}
-          </div>
+          {isComplete ? (
+            <GradeBadge grade={displayGrade} score={displayScore} size="sm" />
+          ) : (
+            <div className="flex-shrink-0 px-3 py-2 rounded-lg bg-theme-tertiary border border-theme">
+              <span className="text-sm text-theme-secondary capitalize">
+                {audit.status}
+              </span>
+            </div>
+          )}
         </div>
 
         {isComplete && (

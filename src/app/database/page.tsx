@@ -71,7 +71,7 @@ export default function DatabasePage() {
   }, [auditsPage, searchTerm, sortBy]);
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen overflow-x-hidden">
       <div className="container mx-auto px-4 py-12">
         {/* Header */}
         <div className="max-w-4xl mx-auto mb-12">

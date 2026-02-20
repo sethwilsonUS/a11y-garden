@@ -66,7 +66,7 @@ export function GradeBadge({ grade, score, size = "md" }: GradeBadgeProps) {
           {gradeIndicators[grade]}
         </span>
       </div>
-      <div className="text-left">
+      <div className={`text-left ${size === "sm" ? "hidden sm:block" : ""}`}>
         <div className={`${sizeStyle.label} font-medium text-theme-secondary`}>
           {gradeLabels[grade]}
         </div>
