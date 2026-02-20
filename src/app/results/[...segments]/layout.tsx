@@ -41,14 +41,24 @@ export async function generateMetadata({
       return { title: "Accessibility Report | A11y Garden" };
     }
 
-    const siteTitle = audit.pageTitle || audit.domain;
+    // Build a display URL that includes the path (e.g. "t3.gg/blog" not just "t3.gg")
+    let displayUrl = audit.domain;
+    try {
+      const u = new URL(audit.url);
+      const path = u.pathname.replace(/\/$/, "");
+      displayUrl = u.host + path;
+    } catch {
+      // fall back to domain
+    }
+
+    const siteTitle = audit.pageTitle || displayUrl;
     const title = `Accessibility Report for ${siteTitle}`;
     const issueWord = audit.violations.total === 1 ? "issue" : "issues";
 
     const description =
       audit.status === "complete"
-        ? `Scanned ${audit.domain} and found ${audit.violations.total} accessibility ${issueWord}. View the full report on A11y Garden.`
-        : `Accessibility scan for ${audit.domain} in progress. View results on A11y Garden.`;
+        ? `Scanned ${displayUrl} and found ${audit.violations.total} accessibility ${issueWord}. View the full report on A11y Garden.`
+        : `Accessibility scan for ${displayUrl} in progress. View results on A11y Garden.`;
 
     const ogImageUrl = `/api/og/${auditId}`;
 
@@ -65,7 +75,7 @@ export async function generateMetadata({
             url: ogImageUrl,
             width: 1200,
             height: 630,
-            alt: `Accessibility Report for ${siteTitle} — A11y Garden`,
+            alt: `Accessibility Report for ${displayUrl} — A11y Garden`,
           },
         ],
       },

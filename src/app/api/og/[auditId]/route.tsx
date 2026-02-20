@@ -28,7 +28,7 @@ export async function GET(
   const { auditId } = await params;
 
   let siteTitle = "Unknown Site";
-  let domain = "";
+  let displayUrl = "";
   let issueCount = 0;
   let screenshotUrl: string | null = null;
 
@@ -40,8 +40,16 @@ export async function GET(
       });
 
       if (audit) {
-        siteTitle = audit.pageTitle || audit.domain;
-        domain = audit.domain;
+        // Build a display URL that includes the path (e.g. "t3.gg/blog" not just "t3.gg")
+        try {
+          const u = new URL(audit.url);
+          const path = u.pathname.replace(/\/$/, "");
+          displayUrl = u.host + path;
+        } catch {
+          displayUrl = audit.domain;
+        }
+
+        siteTitle = audit.pageTitle || displayUrl;
         issueCount = audit.violations.total;
 
         // Fetch screenshot URL if one was captured
@@ -66,7 +74,7 @@ export async function GET(
     siteTitle = siteTitle.slice(0, 57) + "…";
   }
 
-  const showDomainSeparately = domain && siteTitle !== domain;
+  const showDomainSeparately = displayUrl && siteTitle !== displayUrl;
 
   return new ImageResponse(
     (
@@ -181,7 +189,7 @@ export async function GET(
                     marginBottom: "20px",
                   }}
                 >
-                  {domain}
+                  {displayUrl}
                 </div>
               )}
 
