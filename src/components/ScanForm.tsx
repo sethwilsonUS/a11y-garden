@@ -287,15 +287,41 @@ export function ScanForm() {
       </div>
 
       <div className="flex items-center gap-3 p-4 bg-theme-secondary rounded-xl border border-theme">
-        <input
-          type="checkbox"
-          id="isPublic"
-          checked={isPublic}
-          onChange={(e) => setIsPublic(e.target.checked)}
-          disabled={isSubmitting}
-          className="w-5 h-5 rounded border-[var(--border-color)] bg-theme-tertiary accent-[var(--accent)] focus:ring-[var(--accent)] focus:ring-offset-2 cursor-pointer"
-        />
-        <label htmlFor="isPublic" className="text-sm text-theme-secondary cursor-pointer">
+        <label
+          htmlFor="isPublic"
+          className={`flex items-center gap-3 text-sm text-theme-secondary select-none ${
+            isSubmitting ? "opacity-50 cursor-not-allowed" : "cursor-pointer"
+          }`}
+        >
+          {/* Visually-hidden native checkbox for accessibility */}
+          <input
+            type="checkbox"
+            id="isPublic"
+            checked={isPublic}
+            onChange={(e) => setIsPublic(e.target.checked)}
+            disabled={isSubmitting}
+            className="sr-only peer"
+          />
+          {/* Custom visual checkbox */}
+          <span
+            aria-hidden="true"
+            className="flex-shrink-0 w-5 h-5 rounded-[5px] border-[2.5px] border-[var(--text-primary)] flex items-center justify-center transition-colors duration-150 peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-[var(--accent)]"
+          >
+            {isPublic && (
+              <svg
+                className="w-3.5 h-3.5 text-[var(--text-primary)]"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="3"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M3 8.5L6.5 12L13 4" />
+              </svg>
+            )}
+          </span>
           Share results in the community garden (public database)
         </label>
       </div>
