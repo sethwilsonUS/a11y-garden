@@ -54,11 +54,6 @@ export const createAudit = mutation({
   handler: async (ctx, args) => {
     const userId = await getAuthUserId(ctx);
 
-    // Anonymous users can only create public audits
-    if (!userId && !args.isPublic) {
-      throw new Error("Sign in to create private audits");
-    }
-
     // Normalize URL by stripping www. prefix
     const urlObj = new URL(args.url);
     if (urlObj.hostname.startsWith("www.")) {
