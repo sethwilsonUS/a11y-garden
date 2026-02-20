@@ -26,6 +26,14 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
+  // metadataBase ensures OG image URLs resolve to the correct host.
+  // On Vercel, VERCEL_PROJECT_PRODUCTION_URL is auto-set to the primary domain.
+  metadataBase: new URL(
+    process.env.NEXT_PUBLIC_SITE_URL ||
+      (process.env.VERCEL_PROJECT_PRODUCTION_URL
+        ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}`
+        : "http://localhost:3000"),
+  ),
   title: "A11y Garden — Nurture a More Accessible Web",
   description:
     "Scan any website for accessibility issues and get AI-powered recommendations. Cultivate WCAG compliance one page at a time.",
