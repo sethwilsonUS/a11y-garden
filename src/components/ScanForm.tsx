@@ -302,13 +302,15 @@ export function ScanForm() {
 
       <button
         type="submit"
-        disabled={isSubmitting}
+        disabled={isSubmitting || !url.trim()}
+        aria-disabled={isSubmitting || !url.trim()}
         className={`relative w-full h-14 btn-primary text-base rounded-xl overflow-hidden ${
           isSubmitting ? "opacity-80 animate-pulse" : ""
         }`}
       >
-        {/* Default state */}
+        {/* Default state — aria-hidden keeps VoiceOver from reading both spans */}
         <span
+          aria-hidden={isSubmitting}
           className={`absolute inset-0 flex items-center justify-center gap-3 transition-all duration-300 ${
             isSubmitting ? "opacity-0 translate-y-4" : "opacity-100 translate-y-0"
           }`}
@@ -319,8 +321,9 @@ export function ScanForm() {
           Scan for Accessibility Issues
         </span>
 
-        {/* Loading state */}
+        {/* Loading state — aria-hidden keeps VoiceOver from reading both spans */}
         <span
+          aria-hidden={!isSubmitting}
           className={`absolute inset-0 flex items-center justify-center gap-3 transition-all duration-300 ${
             isSubmitting ? "opacity-100 translate-y-0" : "opacity-0 -translate-y-4"
           }`}
@@ -339,6 +342,11 @@ export function ScanForm() {
           </span>
         </span>
       </button>
+
+      {/* Live region for screen reader scan-progress announcements */}
+      <div className="sr-only" aria-live="assertive" aria-atomic="true">
+        {isSubmitting ? scanStatus || "Scan in progress…" : ""}
+      </div>
     </form>
   );
 }
