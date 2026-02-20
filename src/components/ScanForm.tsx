@@ -5,6 +5,7 @@ import { useMutation, useAction } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { useRouter } from "next/navigation";
 import { Id } from "../../convex/_generated/dataModel";
+import { buildResultsUrl } from "@/lib/urls";
 
 export function ScanForm() {
   const [url, setUrl] = useState("");
@@ -176,7 +177,10 @@ export function ScanForm() {
       analyzeViolations({ auditId });
 
       // Step 6: Navigate to results immediately
-      router.push(`/results/${auditId}`);
+      // The exact scannedAt stored in Convex may differ by a few ms, but the
+      // date segment (YYYY-MM-DD) will match. The legacy-redirect logic on the
+      // results page ensures URLs stay canonical.
+      router.push(buildResultsUrl(normalizedUrl, Date.now(), auditId));
     } catch (err: unknown) {
       const errorMessage = err instanceof Error ? err.message : "Failed to create audit";
       setError(errorMessage);

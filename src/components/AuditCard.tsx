@@ -2,6 +2,7 @@ import Link from "next/link";
 import { GradeBadge } from "./GradeBadge";
 import { Id } from "../../convex/_generated/dataModel";
 import { calculateGrade, GRADING_VERSION } from "@/lib/grading";
+import { buildResultsUrl } from "@/lib/urls";
 
 interface AuditCardProps {
   audit: {
@@ -47,7 +48,7 @@ export function AuditCard({ audit }: AuditCardProps) {
 
   return (
     <Link
-      href={`/results/${audit._id}`}
+      href={buildResultsUrl(audit.url, audit.scannedAt, audit._id)}
       className="block group min-w-0"
     >
       <div className="garden-bed p-4 sm:p-5 transition-all duration-200 overflow-hidden">
