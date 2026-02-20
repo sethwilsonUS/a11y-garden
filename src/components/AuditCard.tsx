@@ -48,7 +48,7 @@ export function AuditCard({ audit }: AuditCardProps) {
   return (
     <Link
       href={`/results/${audit._id}`}
-      className="block group"
+      className="block group min-w-0"
     >
       <div className="garden-bed p-4 sm:p-5 transition-all duration-200 overflow-hidden">
         <div className="flex items-start justify-between gap-3 sm:gap-4">

@@ -15,9 +15,8 @@ export interface NavLink {
  * "development" so the two components stay in sync automatically.
  */
 export function getNavLinks(): NavLink[] {
-  const isDev = process.env.NODE_ENV === "development";
-
   if (isLocalMode) {
+    const isDev = process.env.NODE_ENV === "development";
     return [
       { href: "/demo", label: "Scan" },
       ...(isDev ? [{ href: "/test-error", label: "Error" }] : []),
@@ -27,11 +26,5 @@ export function getNavLinks(): NavLink[] {
   return [
     { href: "/", label: "Home" },
     { href: "/database", label: "Garden" },
-    ...(isDev
-      ? [
-          { href: "/demo", label: "Demo" },
-          { href: "/test-error", label: "Error" },
-        ]
-      : []),
   ];
 }
