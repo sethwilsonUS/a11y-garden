@@ -54,7 +54,7 @@ export function GradeBadge({ grade, score, size = "md" }: GradeBadgeProps) {
 
   return (
     <div
-      className={`inline-flex items-center ${sizeStyle.gap} ${sizeStyle.container} rounded-2xl border-2 bg-[var(--accent-bg)] border-[var(--accent-border)] shadow-lg`}
+      className={`inline-flex flex-shrink-0 items-center ${sizeStyle.gap} ${sizeStyle.container} rounded-2xl border-2 bg-[var(--accent-bg)] border-[var(--accent-border)] shadow-lg`}
       role="status"
       aria-label={`Accessibility grade: ${grade} — ${gradeLabels[grade]} — Score: ${score} out of 100`}
     >

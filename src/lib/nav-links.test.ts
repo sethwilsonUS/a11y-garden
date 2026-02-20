@@ -51,31 +51,28 @@ describe("getNavLinks", () => {
       expect(links).toContainEqual({ href: "/database", label: "Garden" });
     });
 
-    it("includes Demo link", () => {
+    it("does not include Demo link (dev-only pages are only in local mode nav)", () => {
       vi.stubEnv("NODE_ENV", "development");
 
       const links = getNavLinks();
 
-      expect(links).toContainEqual({ href: "/demo", label: "Demo" });
+      expect(links.find((l) => l.label === "Demo")).toBeUndefined();
     });
 
-    it("includes Error link", () => {
+    it("does not include Error link (dev-only pages are only in local mode nav)", () => {
       vi.stubEnv("NODE_ENV", "development");
 
       const links = getNavLinks();
 
-      expect(links).toContainEqual({
-        href: "/test-error",
-        label: "Error",
-      });
+      expect(links.find((l) => l.label === "Error")).toBeUndefined();
     });
 
-    it("returns exactly 4 links", () => {
+    it("returns exactly 2 links (same as production)", () => {
       vi.stubEnv("NODE_ENV", "development");
 
       const links = getNavLinks();
 
-      expect(links).toHaveLength(4);
+      expect(links).toHaveLength(2);
     });
   });
 

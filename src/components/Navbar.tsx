@@ -96,16 +96,7 @@ function AuthControls() {
 export function Navbar() {
   const pathname = usePathname();
 
-  // Dev-only emoji prefixes for quick visual distinction in the navbar
-  const devEmojis: Record<string, string> = {
-    "/demo": "🧪 ",
-    "/test-error": "💥 ",
-  };
-
-  const navLinks = getNavLinks().map((link) => ({
-    ...link,
-    label: (devEmojis[link.href] ?? "") + link.label,
-  }));
+  const navLinks = getNavLinks();
 
   const isActive = (href: string) => {
     if (href === "/") return pathname === "/";
