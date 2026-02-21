@@ -5,6 +5,8 @@
  * Generates a formatted markdown accessibility report from scan results.
  */
 
+import { PLATFORM_LABELS } from "./platforms";
+
 // Axe-core violation structure (for report / display purposes)
 export interface AxeNode {
   html: string;
@@ -39,6 +41,10 @@ export interface ReportData {
   };
   scanMode?: "full" | "safe";
   rawViolations?: string;
+  /** Detected website platform/CMS slug (e.g. "wordpress") */
+  platform?: string;
+  /** Platform-specific fix advice from AI */
+  platformTip?: string;
 }
 
 export function generateMarkdownReport(
@@ -90,6 +96,17 @@ ${audit.aiSummary}
 ## Top Issues to Address
 
 ${audit.topIssues.map((issue, i) => `${i + 1}. ${issue}`).join("\n")}
+`;
+  }
+
+  if (audit.platformTip && audit.platform) {
+    const label = PLATFORM_LABELS[audit.platform] ?? audit.platform;
+    markdown += `
+---
+
+## ${label} Tip
+
+${audit.platformTip}
 `;
   }
 

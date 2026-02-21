@@ -251,6 +251,8 @@ export interface ScanResult {
   screenshot?: Buffer;
   /** Warning about the screenshot (e.g. appears blank). */
   screenshotWarning?: string;
+  /** Detected website platform/CMS (e.g. "wordpress", "squarespace"). */
+  platform?: string;
 }
 
 export interface ScanOptions {
@@ -258,6 +260,173 @@ export interface ScanOptions {
   browserWSEndpoint?: string;
   /** When true, capture a JPEG screenshot of the page before running axe-core. */
   captureScreenshot?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Platform / CMS detection
+// ---------------------------------------------------------------------------
+
+// Re-export platform labels so consumers can import from either location
+export { PLATFORM_LABELS } from "./platforms";
+
+/**
+ * Detect the platform/CMS powering a page.
+ *
+ * Uses `page.content()` to pull the full serialised HTML into Node.js
+ * and pattern-matches server-side.  This avoids issues with
+ * `page.evaluate` (SVGAnimatedString on className, cross-origin
+ * stylesheet access errors, etc.) and makes the detection debuggable
+ * via normal console.log.
+ *
+ * Detection signals are intentionally broad — enterprise/managed
+ * hosting (e.g. WordPress VIP, Squarespace custom domains) often
+ * strips the obvious markers, so we check multiple signals per
+ * platform and match on *any*.
+ */
+async function detectPlatform(
+  page: import("playwright").Page,
+): Promise<string | undefined> {
+  // Pull the full rendered HTML into Node.js for matching.
+  // page.content() returns the serialised DOM including all script/link
+  // tags, comments, data-attributes, and inline text — everything we need.
+  const html = (await page.content()).toLowerCase();
+
+  // Helper: find which pattern matched (returns the first match, or undefined).
+  // Used both for the detection check and for debug logging.
+  const matched = (...patterns: string[]) =>
+    patterns.find((p) => html.includes(p));
+
+  let platform: string | undefined;
+  let signal: string | undefined;
+
+  // ---- WordPress ----------------------------------------------------------
+  // Standard installs expose wp-content/ and a generator meta tag.
+  // Managed/VIP hosts (e.g. WordPress VIP used by TED, Time, etc.)
+  // often strip those but still expose wp-json, wp-emoji, wp-block-*
+  // classes, or "wordpress" in the page text.
+  if (
+    (signal = matched(
+      'content="wordpress', "wp-content/", "wp-includes/",
+      "wp-json", "wp-emoji", "wp-block-",
+      "wordpress.com", "wpvip.com", "wordpress vip",
+      "powered by wordpress",
+    ))
+  )
+    platform = "wordpress";
+
+  // ---- Drupal --------------------------------------------------------------
+  else if (
+    (signal = matched(
+      'content="drupal', "drupal.js", "/sites/default/files",
+      "drupal.org", "drupal.settings", "data-drupal-",
+      "/core/misc/drupal.js", "/modules/system/",
+      "views-row", "field-name-",
+    ))
+  )
+    platform = "drupal";
+
+  // ---- Joomla --------------------------------------------------------------
+  else if (
+    (signal = matched(
+      'content="joomla', "/media/jui/", "/media/system/js/",
+      "/components/com_", "/modules/mod_",
+      "joomla!", "task=",
+    ))
+  )
+    platform = "joomla";
+
+  // ---- Ghost ---------------------------------------------------------------
+  else if (
+    (signal = matched(
+      'content="ghost', "ghost.org", "ghost.io",
+      "/ghost/api/", "ghost-portal", "ghost-search",
+      "data-ghost-", "gh-head", "gh-portal",
+      "powered by ghost",
+    ))
+  )
+    platform = "ghost";
+
+  // ---- Squarespace --------------------------------------------------------
+  // Custom-domain sites serve assets from multiple CDNs:
+  //   static1.squarespace.com, images.squarespace-cdn.com, sqsp.net
+  // They also use sqs-* CSS classes, data-squarespace-* attributes,
+  // and sometimes an HTML comment "This is Squarespace."
+  else if (
+    (signal = matched(
+      "squarespace.com", "squarespace-cdn.com", "sqsp.net",
+      "data-squarespace", "sqs-block", "sqs-layout",
+      "sqs-announcement-bar", "sqs-slide-wrapper",
+      "this is squarespace",
+    ))
+  )
+    platform = "squarespace";
+
+  // ---- Shopify -------------------------------------------------------------
+  else if (
+    (signal = matched(
+      "cdn.shopify.com", "myshopify.com",
+      "shopify.theme", "shopify-section",
+      "shopify-payment", "shopify-features",
+      "data-shopify", "shopify-app",
+    ))
+  )
+    platform = "shopify";
+
+  // ---- Wix -----------------------------------------------------------------
+  else if (
+    (signal = matched(
+      "static.wixstatic.com", "parastorage.com",
+      "wix.com", "wixsite.com",
+      "x-wix-", "data-mesh-id",
+      "wixui-", "wix-thunderbolt",
+    ))
+  )
+    platform = "wix";
+
+  // ---- Webflow -------------------------------------------------------------
+  else if (
+    (signal = matched(
+      "webflow.com", "website-files.com",
+      "wf-design", "w-webflow-badge",
+      "data-wf-site", "data-wf-page",
+    ))
+  )
+    platform = "webflow";
+
+  // ---- HubSpot CMS ---------------------------------------------------------
+  else if (
+    (signal = matched(
+      "js.hs-scripts.com", "hs-banner.com",
+      ".hubspot.com", "hs-script-loader",
+      "hubspot-topic", "hs-menu-wrapper",
+      "data-hs-", "hs_cos_wrapper",
+      "powered by hubspot",
+    ))
+  )
+    platform = "hubspot";
+
+  // ---- Weebly --------------------------------------------------------------
+  else if (
+    (signal = matched(
+      "weebly.com", "editmysite.com",
+      "wsite-", "weebly-",
+      "data-wsite-", "weeblycloud.com",
+      "powered by weebly",
+    ))
+  )
+    platform = "weebly";
+
+  if (platform) {
+    console.log(`[Platform] Detected: ${platform} (matched "${signal}")`);
+  } else {
+    // Log a snippet so we can diagnose missed detections.
+    // Only the first 300 chars — enough to see the <head> generator tag area.
+    console.log(
+      `[Platform] None detected. HTML starts with: ${html.substring(0, 300)}...`,
+    );
+  }
+
+  return platform;
 }
 
 // ---------------------------------------------------------------------------
@@ -413,6 +582,12 @@ export async function scanUrl(
 
     // Grab the page title while we have the page loaded
     const pageTitle = await page.title().catch(() => "");
+
+    // --- Detect platform / CMS ------------------------------------------------
+    const platform = await detectPlatform(page).catch((err) => {
+      console.error("[Platform] Detection failed:", err);
+      return undefined;
+    });
 
     // --- Detect WAF / bot-block pages ----------------------------------------
     // If we got a block page instead of the real site, the scan results
@@ -621,6 +796,7 @@ export async function scanUrl(
       ...(combinedWarnings && { warning: combinedWarnings }),
       ...(screenshot && { screenshot }),
       ...(screenshotWarning && { screenshotWarning }),
+      ...(platform && { platform }),
     };
   } finally {
     await browser.close();

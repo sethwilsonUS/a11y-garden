@@ -9,6 +9,7 @@ import { StatusIndicator } from "@/components/StatusIndicator";
 import { calculateGrade, GRADING_VERSION } from "@/lib/grading";
 import { generateMarkdownReport, type AxeViolation, type ReportData } from "@/lib/report";
 import { buildResultsUrl, parseResultsSegments } from "@/lib/urls";
+import { PLATFORM_LABELS } from "@/lib/platforms";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { use, useEffect, useRef, useState, useCallback } from "react";
@@ -18,6 +19,7 @@ import { ScreenshotSection } from "@/components/ScreenshotSection";
 interface Audit extends ReportData {
   domain: string;
   truncated?: boolean;
+  platform?: string;
 }
 
 // Severity config using CSS vars
@@ -251,6 +253,48 @@ function DetailedViolationsAccordion({ rawViolations }: { rawViolations: string 
               </div>
             );
           })}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function PlatformTipAccordion({ platform, platformTip }: { platform: string; platformTip: string }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const label = PLATFORM_LABELS[platform] ?? platform;
+
+  return (
+    <section className="garden-bed overflow-hidden">
+      <button
+        onClick={() => setIsOpen(!isOpen)}
+        className="w-full px-6 py-4 flex items-center justify-between bg-theme-secondary hover:bg-theme-tertiary transition-colors cursor-pointer rounded-t-2xl"
+        aria-expanded={isOpen}
+        aria-controls="platform-tip-panel"
+      >
+        <div className="flex items-center gap-3">
+          <svg className="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+          </svg>
+          <span className="font-display font-semibold text-theme-primary">
+            {label} Tip
+          </span>
+        </div>
+        <svg
+          className={`w-5 h-5 text-theme-secondary transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+          aria-hidden="true"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      {isOpen && (
+        <div id="platform-tip-panel" className="px-6 py-5 bg-theme-primary border-t border-theme">
+          <p className="text-theme-secondary leading-relaxed">
+            {platformTip}
+          </p>
         </div>
       )}
     </section>
@@ -541,15 +585,25 @@ export default function ResultsPage({
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                 </svg>
               </a>
-              <p className="text-sm text-theme-muted mt-2">
-                Scanned{" "}
-                {new Date(audit.scannedAt).toLocaleDateString("en-US", {
-                  weekday: "long",
-                  year: "numeric",
-                  month: "long",
-                  day: "numeric",
-                })}
-              </p>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2">
+                <p className="text-sm text-theme-muted">
+                  Scanned{" "}
+                  {new Date(audit.scannedAt).toLocaleDateString("en-US", {
+                    weekday: "long",
+                    year: "numeric",
+                    month: "long",
+                    day: "numeric",
+                  })}
+                </p>
+                {audit.platform && PLATFORM_LABELS[audit.platform] && (
+                  <span className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full bg-theme-secondary border border-theme text-theme-secondary">
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+                    </svg>
+                    Built with {PLATFORM_LABELS[audit.platform]}
+                  </span>
+                )}
+              </div>
             </div>
 
             <div className="flex flex-col items-center lg:items-end gap-2">
@@ -758,6 +812,14 @@ export default function ResultsPage({
               </div>
             </section>
           ) : null}
+
+          {/* Platform-Specific Tip (accordion) */}
+          {audit.platformTip && audit.platform && PLATFORM_LABELS[audit.platform] && (
+            <PlatformTipAccordion
+              platform={audit.platform}
+              platformTip={audit.platformTip}
+            />
+          )}
 
           {/* Detailed Violations Accordion */}
           {audit.rawViolations && audit.violations.total > 0 && (

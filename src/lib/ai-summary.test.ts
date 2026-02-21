@@ -261,6 +261,167 @@ describe("generateAISummary", () => {
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
+  // PLATFORM CONTEXT
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe("platform context", () => {
+    const sampleViolations = JSON.stringify([
+      {
+        id: "link-name",
+        impact: "serious",
+        help: "Links must have discernible text",
+        nodes: [{ html: "<a href='#'>" }],
+      },
+    ]);
+
+    it("includes platform instruction in the prompt when platform is provided", async () => {
+      vi.stubEnv("OPENAI_API_KEY", "sk-test-key");
+
+      mockCreate.mockResolvedValue({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                summary: "test",
+                topIssues: [],
+                platformTip: "Use Squarespace's design panel.",
+              }),
+            },
+          },
+        ],
+      });
+
+      await generateAISummary(sampleViolations, "gpt-4.1-mini", "squarespace");
+
+      const callArgs = mockCreate.mock.calls[0][0];
+      const userMessage = callArgs.messages[1].content as string;
+      expect(userMessage).toContain("platformTip");
+      expect(userMessage).toContain("Squarespace");
+    });
+
+    it("does NOT include platform instruction when platform is undefined", async () => {
+      vi.stubEnv("OPENAI_API_KEY", "sk-test-key");
+
+      mockCreate.mockResolvedValue({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({ summary: "test", topIssues: [] }),
+            },
+          },
+        ],
+      });
+
+      await generateAISummary(sampleViolations, "gpt-4.1-mini", undefined);
+
+      const callArgs = mockCreate.mock.calls[0][0];
+      const userMessage = callArgs.messages[1].content as string;
+      expect(userMessage).not.toContain("platformTip");
+    });
+
+    it("returns platformTip when AI response includes it", async () => {
+      vi.stubEnv("OPENAI_API_KEY", "sk-test-key");
+
+      mockCreate.mockResolvedValue({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                summary: "The site has issues.",
+                topIssues: ["Fix links"],
+                platformTip: "In WordPress, install the WP Accessibility plugin.",
+              }),
+            },
+          },
+        ],
+      });
+
+      const result = await generateAISummary(
+        sampleViolations,
+        "gpt-4.1-mini",
+        "wordpress",
+      );
+
+      expect(result.platformTip).toBe(
+        "In WordPress, install the WP Accessibility plugin.",
+      );
+    });
+
+    it("returns undefined platformTip when AI response does not include it", async () => {
+      vi.stubEnv("OPENAI_API_KEY", "sk-test-key");
+
+      mockCreate.mockResolvedValue({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                summary: "The site has issues.",
+                topIssues: ["Fix links"],
+              }),
+            },
+          },
+        ],
+      });
+
+      const result = await generateAISummary(sampleViolations);
+
+      expect(result.platformTip).toBeUndefined();
+    });
+
+    it("trims whitespace from platformTip", async () => {
+      vi.stubEnv("OPENAI_API_KEY", "sk-test-key");
+
+      mockCreate.mockResolvedValue({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                summary: "test",
+                topIssues: [],
+                platformTip: "  Some tip with whitespace.  ",
+              }),
+            },
+          },
+        ],
+      });
+
+      const result = await generateAISummary(
+        sampleViolations,
+        "gpt-4.1-mini",
+        "shopify",
+      );
+
+      expect(result.platformTip).toBe("Some tip with whitespace.");
+    });
+
+    it("treats empty-string platformTip as undefined", async () => {
+      vi.stubEnv("OPENAI_API_KEY", "sk-test-key");
+
+      mockCreate.mockResolvedValue({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                summary: "test",
+                topIssues: [],
+                platformTip: "",
+              }),
+            },
+          },
+        ],
+      });
+
+      const result = await generateAISummary(
+        sampleViolations,
+        "gpt-4.1-mini",
+        "wix",
+      );
+
+      expect(result.platformTip).toBeUndefined();
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
   // ERROR HANDLING
   // ═══════════════════════════════════════════════════════════════════════════
 
