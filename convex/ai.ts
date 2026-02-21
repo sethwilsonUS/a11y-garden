@@ -42,13 +42,13 @@ export const analyzeViolations = action({
         return;
       }
 
-      // Create prompt for OpenAI
+      // Create prompt for OpenAI — kept in sync with src/lib/ai-summary.ts
       const systemPrompt = `You are an accessibility expert translating technical WCAG violations into plain English for web developers and site owners. Focus on user impact and actionable fixes. Be concise and helpful.`;
 
       const userPrompt = `
 Analyze these accessibility violations and provide:
 1. A 2-3 sentence summary of the overall accessibility state
-2. The top 3 most critical issues (brief, one-line descriptions with user impact)
+2. The most important issues to address, as a JSON array called "topIssues". Each entry should be a brief, one-line description with user impact. Include between 1 and 5 issues — use your judgment based on the number and diversity of violations. If there is only one distinct problem, return just one issue. If there are many different problems, return up to 5. Never repeat the same issue in different words.
 
 Violations:
 ${JSON.stringify(violations.slice(0, 10), null, 2)}
@@ -56,13 +56,13 @@ ${JSON.stringify(violations.slice(0, 10), null, 2)}
 Format your response as JSON:
 {
   "summary": "...",
-  "topIssues": ["issue 1", "issue 2", "issue 3"]
+  "topIssues": ["issue 1", "...up to 5"]
 }
 `;
 
       // Call OpenAI
       const completion = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
+        model: "gpt-4.1-mini",
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
@@ -77,11 +77,16 @@ Format your response as JSON:
 
       const response = JSON.parse(content);
 
+      // Safety cap: ensure topIssues is between 0-5 items
+      const topIssues: string[] = Array.isArray(response.topIssues)
+        ? response.topIssues.slice(0, 5)
+        : [];
+
       // Update audit with AI results (status is already complete)
       await ctx.runMutation(api.audits.updateAuditAIOnly, {
         auditId: args.auditId,
         aiSummary: response.summary || "Analysis complete.",
-        topIssues: response.topIssues || [],
+        topIssues,
       });
     } catch (error: unknown) {
       console.error("AI analysis error:", error);

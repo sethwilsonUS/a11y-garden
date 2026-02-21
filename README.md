@@ -19,7 +19,7 @@ A friendly accessibility audit tool that provides AI insights and specific, acti
 ## Features
 
 - 🔍 **Automated Accessibility Scanning** — Uses axe-core to test websites against WCAG 2.2 guidelines
-- 🤖 **AI-Powered Insights** — GPT-4o-mini translates technical violations into plain English explanations
+- 🤖 **AI-Powered Insights** — GPT-4.1 Mini translates technical violations into plain English explanations
 - 📊 **Letter Grade System** — Easy-to-understand A-F grading based on violation severity
 - 🗄️ **Community Database** — Browse and search accessibility audits shared by other users
 - 👤 **User Accounts** — Save and manage your audit history with Clerk authentication
@@ -63,7 +63,7 @@ A friendly accessibility audit tool that provides AI insights and specific, acti
 | **Backend** | [Convex](https://convex.dev/) (serverless functions & real-time database) |
 | **Authentication** | [Clerk](https://clerk.com/) |
 | **Scanning Engine** | [Playwright](https://playwright.dev/) + [axe-core](https://github.com/dequelabs/axe-core) |
-| **AI Analysis** | [OpenAI GPT-4o-mini](https://openai.com/) |
+| **AI Analysis** | [OpenAI GPT-4.1 Mini](https://openai.com/) |
 | **Rate Limiting** | [Upstash Redis](https://upstash.com/) (sliding window + concurrency) |
 | **Fonts** | Fraunces, DM Sans, JetBrains Mono |
 

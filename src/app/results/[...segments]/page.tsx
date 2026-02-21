@@ -693,9 +693,17 @@ export default function ResultsPage({
                   AI Summary
                 </h2>
                 {audit.aiSummary ? (
-                  <p className="text-theme-secondary leading-relaxed">
-                    {audit.aiSummary}
-                  </p>
+                  <>
+                    <p className="text-theme-secondary leading-relaxed">
+                      {audit.aiSummary}
+                    </p>
+                    <p className="text-xs text-theme-muted mt-3 flex items-center gap-1.5">
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                      </svg>
+                      Powered by OpenAI GPT-4.1 Mini
+                    </p>
+                  </>
                 ) : (
                   <div className="space-y-2" aria-label="Loading AI summary">
                     <div className="h-4 bg-[var(--accent-bg)] rounded animate-pulse w-full" />
@@ -735,7 +743,7 @@ export default function ResultsPage({
                 Areas to Tend First
               </h2>
               <div className="space-y-3">
-                {[1, 2, 3].map((i) => (
+                {[1, 2].map((i) => (
                   <div
                     key={i}
                     className="flex gap-4 p-5 garden-bed"

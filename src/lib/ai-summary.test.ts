@@ -107,7 +107,7 @@ describe("generateAISummary", () => {
       ]);
     });
 
-    it("calls OpenAI with gpt-4o-mini model", async () => {
+    it("calls OpenAI with gpt-4.1-mini model by default", async () => {
       vi.stubEnv("OPENAI_API_KEY", "sk-test-key");
 
       mockCreate.mockResolvedValue({
@@ -120,14 +120,36 @@ describe("generateAISummary", () => {
         ],
       });
 
-      await generateAISummary(sampleViolations);
+      const result = await generateAISummary(sampleViolations);
 
       expect(mockCreate).toHaveBeenCalledWith(
         expect.objectContaining({
-          model: "gpt-4o-mini",
+          model: "gpt-4.1-mini",
           response_format: { type: "json_object" },
         }),
       );
+      expect(result.model).toBe("gpt-4.1-mini");
+    });
+
+    it("uses a custom model when provided", async () => {
+      vi.stubEnv("OPENAI_API_KEY", "sk-test-key");
+
+      mockCreate.mockResolvedValue({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({ summary: "test", topIssues: [] }),
+            },
+          },
+        ],
+      });
+
+      const result = await generateAISummary(sampleViolations, "gpt-4o");
+
+      expect(mockCreate).toHaveBeenCalledWith(
+        expect.objectContaining({ model: "gpt-4o" }),
+      );
+      expect(result.model).toBe("gpt-4o");
     });
 
     it("sends system and user prompts", async () => {
@@ -150,6 +172,58 @@ describe("generateAISummary", () => {
       expect(callArgs.messages[0].role).toBe("system");
       expect(callArgs.messages[1].role).toBe("user");
       expect(callArgs.messages[0].content).toContain("accessibility expert");
+    });
+
+    it("handles a single top issue (dynamic count)", async () => {
+      vi.stubEnv("OPENAI_API_KEY", "sk-test-key");
+
+      mockCreate.mockResolvedValue({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                summary: "One minor issue found.",
+                topIssues: ["Add alt text to the hero image"],
+              }),
+            },
+          },
+        ],
+      });
+
+      const result = await generateAISummary(sampleViolations);
+
+      expect(result.topIssues).toHaveLength(1);
+      expect(result.topIssues[0]).toBe("Add alt text to the hero image");
+    });
+
+    it("caps topIssues at 5 even if AI returns more", async () => {
+      vi.stubEnv("OPENAI_API_KEY", "sk-test-key");
+
+      mockCreate.mockResolvedValue({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                summary: "Many issues found.",
+                topIssues: [
+                  "Issue 1",
+                  "Issue 2",
+                  "Issue 3",
+                  "Issue 4",
+                  "Issue 5",
+                  "Issue 6 — should be dropped",
+                  "Issue 7 — should be dropped",
+                ],
+              }),
+            },
+          },
+        ],
+      });
+
+      const result = await generateAISummary(sampleViolations);
+
+      expect(result.topIssues).toHaveLength(5);
+      expect(result.topIssues[4]).toBe("Issue 5");
     });
 
     it("limits violations sent to OpenAI to 10", async () => {
