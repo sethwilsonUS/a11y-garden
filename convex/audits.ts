@@ -64,16 +64,27 @@ export const createAudit = mutation({
     // Extract domain from normalized URL
     const domain = urlObj.hostname;
 
-    // Check if URL was scanned recently (within 30 minutes) to prevent accidental double-scans
-    const thirtyMinutesAgo = Date.now() - 30 * 60 * 1000;
-    const recentAudit = await ctx.db
-      .query("audits")
-      .withIndex("by_url", (q) => q.eq("url", normalizedUrl))
-      .filter((q) => q.gt(q.field("scannedAt"), thirtyMinutesAgo))
-      .first();
+    // Check if this user already scanned this URL recently (within 30 minutes)
+    // to prevent accidental double-scans.  Only dedup against the caller's own
+    // audits — returning someone else's audit would cause ownership errors when
+    // the caller later tries to update it.  Anonymous users (no userId) skip
+    // dedup entirely since we can't reliably identify repeat anonymous callers.
+    if (userId) {
+      const thirtyMinutesAgo = Date.now() - 30 * 60 * 1000;
+      const recentAudit = await ctx.db
+        .query("audits")
+        .withIndex("by_url", (q) => q.eq("url", normalizedUrl))
+        .filter((q) =>
+          q.and(
+            q.eq(q.field("userId"), userId),
+            q.gt(q.field("scannedAt"), thirtyMinutesAgo),
+          ),
+        )
+        .first();
 
-    if (recentAudit) {
-      return recentAudit._id;
+      if (recentAudit) {
+        return recentAudit._id;
+      }
     }
 
     // Create new audit
