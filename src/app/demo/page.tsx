@@ -5,6 +5,7 @@ import Link from "next/link";
 import { GradeBadge } from "@/components/GradeBadge";
 import { ViolationCard } from "@/components/ViolationCard";
 import { SafeModeModal } from "@/components/SafeModeModal";
+import { AVAILABLE_MODELS, DEFAULT_AI_MODEL, formatModelPrice } from "@/lib/ai-summary";
 
 // Axe-core violation structure
 interface AxeNode {
@@ -39,6 +40,7 @@ interface ScanResult {
   scannedAt: number;
   aiSummary?: string;
   topIssues?: string[];
+  aiModel?: string;
 }
 
 // Severity config using CSS vars
@@ -251,11 +253,14 @@ export default function DemoPage() {
   const [result, setResult] = useState<ScanResult | null>(null);
   const [safeModeOpen, setSafeModeOpen] = useState(false);
   const closeSafeMode = useCallback(() => setSafeModeOpen(false), []);
+  const [aiModel, setAiModel] = useState(DEFAULT_AI_MODEL);
+  const [aiLoading, setAiLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setIsSubmitting(true);
+    setAiLoading(false);
     setScanStatus("Initializing scan...");
     setResult(null);
 
@@ -325,23 +330,27 @@ export default function DemoPage() {
       // generate an AI summary locally — same path the CLI uses. When the key
       // isn't set the endpoint returns 501 and we silently degrade.
       if (scanResult.violations.total > 0) {
+        setAiLoading(true);
         try {
-          setScanStatus("Generating AI summary...");
+          const modelLabel = AVAILABLE_MODELS.find((m) => m.id === aiModel)?.label ?? aiModel;
+          setScanStatus(`Generating AI summary with ${modelLabel}...`);
           const aiRes = await fetch("/api/ai-summary", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ rawViolations: scanResult.rawViolations }),
+            body: JSON.stringify({ rawViolations: scanResult.rawViolations, model: aiModel }),
           });
 
           if (aiRes.ok) {
             const aiData = await aiRes.json();
             setResult((prev) =>
-              prev ? { ...prev, aiSummary: aiData.summary, topIssues: aiData.topIssues } : prev,
+              prev ? { ...prev, aiSummary: aiData.summary, topIssues: aiData.topIssues, aiModel: aiData.model } : prev,
             );
           }
           // Non-ok (501 = no key, 500 = error) — silently degrade
         } catch {
           // Network error — silently degrade
+        } finally {
+          setAiLoading(false);
         }
       }
     } catch (err: unknown) {
@@ -426,6 +435,33 @@ export default function DemoPage() {
                 </button>
               </div>
 
+              {/* AI Model Selector — local experimentation only */}
+              <div className="mt-4 flex items-center gap-3">
+                <label htmlFor="ai-model" className="text-sm font-medium text-theme-secondary whitespace-nowrap">
+                  <svg className="w-4 h-4 inline-block mr-1.5 -mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                  </svg>
+                  AI Model
+                </label>
+                <select
+                  id="ai-model"
+                  value={aiModel}
+                  onChange={(e) => setAiModel(e.target.value)}
+                  disabled={isSubmitting}
+                  className="flex-1 px-3 py-2 bg-theme-primary border-2 border-theme rounded-lg text-sm text-theme-primary focus:ring-2 focus:ring-[var(--accent)] focus:border-[var(--accent)] transition-all duration-200 disabled:opacity-50 cursor-pointer"
+                  aria-describedby="ai-model-hint"
+                >
+                  {AVAILABLE_MODELS.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.label} — {formatModelPrice(m)} per 1M tokens
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <p id="ai-model-hint" className="mt-1.5 text-xs text-theme-muted">
+                Compare insight quality across models. Prices shown per 1M tokens (in/out). Requires <code className="bg-theme-tertiary px-1 py-0.5 rounded font-mono">OPENAI_API_KEY</code>.
+              </p>
+
               {isSubmitting && (
                 <p className="mt-3 text-sm text-accent flex items-center gap-2" role="status">
                   <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24" aria-hidden="true">
@@ -485,8 +521,8 @@ export default function DemoPage() {
             {/* Header */}
             <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6">
               <div>
-                <h2 className="text-3xl font-display font-bold text-theme-primary mb-2">
-                  {result.pageTitle || "Scan Results"}
+                <h2 className="text-3xl lg:text-4xl font-display font-bold text-theme-primary mb-2">
+                  {result.pageTitle || "Accessibility Report"}
                 </h2>
                 <a
                   href={result.url}
@@ -494,7 +530,15 @@ export default function DemoPage() {
                   rel="noopener noreferrer"
                   className="text-accent hover:underline font-mono text-sm break-all inline-flex items-center gap-2 transition-colors"
                 >
-                  {new URL(result.url).hostname}
+                  {(() => {
+                    try {
+                      const u = new URL(result.url);
+                      const path = u.pathname.replace(/\/$/, "");
+                      return u.host + path;
+                    } catch {
+                      return new URL(result.url).hostname;
+                    }
+                  })()}
                   <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                   </svg>
@@ -502,7 +546,12 @@ export default function DemoPage() {
                 <p className="text-sm text-theme-muted mt-2">Scanned just now</p>
               </div>
 
-              <GradeBadge grade={result.letterGrade} score={result.score} size="lg" />
+              <div className="flex flex-col items-center lg:items-end gap-2">
+                <GradeBadge grade={result.letterGrade} score={result.score} size="lg" />
+                <p className="text-xs text-theme-muted italic">
+                  Based on automated checks only
+                </p>
+              </div>
             </div>
 
             {/* Safe Mode Banner */}
@@ -551,32 +600,52 @@ export default function DemoPage() {
               <ViolationCard violations={result.violations} />
             </section>
 
-            {/* AI Summary — real results when OPENAI_API_KEY is set locally */}
-            <section className="garden-bed p-6">
+            {/* AI Summary */}
+            <section className="garden-bed p-6 lg:p-8 bg-[var(--accent-bg)]" style={{ borderColor: 'var(--accent-border)' }}>
               <div className="flex items-start gap-4">
-                <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-theme-tertiary flex items-center justify-center">
-                  <svg className="w-5 h-5 text-theme-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                  </svg>
+                <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-[var(--accent-bg)] border border-[var(--accent-border)] flex items-center justify-center">
+                  {result.aiSummary ? (
+                    <svg className="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                    </svg>
+                  ) : aiLoading ? (
+                    <svg className="w-5 h-5 text-accent animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                  ) : (
+                    <svg className="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                    </svg>
+                  )}
                 </div>
                 <div className="flex-1">
-                  <h3 className="text-lg font-display font-semibold text-theme-primary mb-2">AI Summary</h3>
+                  <div className="flex items-center gap-3 mb-2">
+                    <h3 className="text-lg font-display font-semibold text-theme-primary">AI Summary</h3>
+                    {result.aiModel && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-[var(--accent-bg)] border border-[var(--accent-border)] text-accent">
+                        {AVAILABLE_MODELS.find((m) => m.id === result.aiModel)?.label ?? result.aiModel}
+                      </span>
+                    )}
+                  </div>
                   {result.aiSummary ? (
                     <>
                       <p className="text-theme-secondary leading-relaxed">
                         {result.aiSummary}
                       </p>
-                      {result.topIssues && result.topIssues.length > 0 && (
-                        <div className="mt-4">
-                          <h4 className="text-sm font-semibold text-theme-primary mb-2">Top Issues</h4>
-                          <ol className="list-decimal list-inside space-y-1 text-theme-secondary text-sm">
-                            {result.topIssues.map((issue, i) => (
-                              <li key={i}>{issue}</li>
-                            ))}
-                          </ol>
-                        </div>
-                      )}
+                      <p className="text-xs text-theme-muted mt-3 flex items-center gap-1.5">
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+                        </svg>
+                        Powered by OpenAI {AVAILABLE_MODELS.find((m) => m.id === result.aiModel)?.label ?? result.aiModel ?? "GPT-4.1 Mini"}
+                      </p>
                     </>
+                  ) : aiLoading ? (
+                    <div className="space-y-2" aria-label="Loading AI summary">
+                      <div className="h-4 bg-[var(--accent-bg)] rounded animate-pulse w-full" />
+                      <div className="h-4 bg-[var(--accent-bg)] rounded animate-pulse w-5/6" />
+                      <div className="h-4 bg-[var(--accent-bg)] rounded animate-pulse w-4/6" />
+                    </div>
                   ) : (
                     <p className="text-theme-muted">
                       Add your{" "}
@@ -599,6 +668,50 @@ export default function DemoPage() {
                 </div>
               </div>
             </section>
+
+            {/* Top Issues — "Areas to Tend First" */}
+            {result.topIssues && result.topIssues.length > 0 ? (
+              <section>
+                <h3 className="text-xl font-display font-bold text-theme-primary mb-4">
+                  Areas to Tend First
+                </h3>
+                <div className="space-y-3">
+                  {result.topIssues.map((issue, index) => (
+                    <div
+                      key={index}
+                      className="flex gap-4 p-5 garden-bed"
+                    >
+                      <span className="flex-shrink-0 w-8 h-8 bg-[var(--btn-primary-bg)] text-white rounded-lg flex items-center justify-center text-sm font-display font-bold shadow-md">
+                        {index + 1}
+                      </span>
+                      <span className="text-theme-secondary leading-relaxed pt-1">
+                        {issue}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            ) : aiLoading && result.violations.total > 0 ? (
+              <section>
+                <h3 className="text-xl font-display font-bold text-theme-primary mb-4">
+                  Areas to Tend First
+                </h3>
+                <div className="space-y-3">
+                  {[1, 2].map((i) => (
+                    <div
+                      key={i}
+                      className="flex gap-4 p-5 garden-bed"
+                    >
+                      <span className="flex-shrink-0 w-8 h-8 bg-theme-tertiary rounded-lg animate-pulse" />
+                      <div className="flex-1 space-y-2 pt-1">
+                        <div className="h-4 bg-theme-tertiary rounded animate-pulse w-full" />
+                        <div className="h-4 bg-theme-tertiary rounded animate-pulse w-3/4" />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </section>
+            ) : null}
 
             {/* Detailed Violations */}
             {result.rawViolations && result.violations.total > 0 && (
