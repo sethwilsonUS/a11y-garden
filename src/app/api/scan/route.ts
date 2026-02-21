@@ -133,6 +133,8 @@ export async function POST(request: NextRequest) {
         ...(scanResult.screenshotWarning && {
           screenshotWarning: scanResult.screenshotWarning,
         }),
+        // Include detected platform/CMS (e.g. "wordpress", "squarespace")
+        ...(scanResult.platform && { platform: scanResult.platform }),
       });
     } finally {
       // Always release the concurrency slot, even on error

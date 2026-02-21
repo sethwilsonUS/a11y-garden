@@ -45,10 +45,34 @@ export const analyzeViolations = action({
       // Create prompt for OpenAI — kept in sync with src/lib/ai-summary.ts
       const systemPrompt = `You are an accessibility expert translating technical WCAG violations into plain English for web developers and site owners. Focus on user impact and actionable fixes. Be concise and helpful.`;
 
+      // Platform-specific context for more actionable advice
+      const platformLabels: Record<string, string> = {
+        wordpress: "WordPress",
+        squarespace: "Squarespace",
+        shopify: "Shopify",
+        wix: "Wix",
+        webflow: "Webflow",
+        drupal: "Drupal",
+        joomla: "Joomla",
+        ghost: "Ghost",
+        hubspot: "HubSpot",
+        weebly: "Weebly",
+      };
+      const platform = audit.platform;
+      const platformName = platform ? platformLabels[platform] ?? platform : null;
+
+      const platformInstruction = platformName
+        ? `\n3. A "platformTip" — a concise paragraph (2-4 sentences) with actionable, ${platformName}-specific guidance for fixing the violations above. Reference specific ${platformName} features, settings, plugins, or tools the site owner can use. Do NOT repeat the general summary — focus only on platform-specific how-to-fix advice.`
+        : "";
+
+      const platformJsonField = platformName
+        ? `\n  "platformTip": "Specific ${platformName} advice..."`
+        : "";
+
       const userPrompt = `
 Analyze these accessibility violations and provide:
 1. A 2-3 sentence summary of the overall accessibility state
-2. The most important issues to address, as a JSON array called "topIssues". Each entry should be a brief, one-line description with user impact. Include between 1 and 5 issues — use your judgment based on the number and diversity of violations. If there is only one distinct problem, return just one issue. If there are many different problems, return up to 5. Never repeat the same issue in different words.
+2. The most important issues to address, as a JSON array called "topIssues". Each entry should be a brief, one-line description with user impact. Include between 1 and 5 issues — use your judgment based on the number and diversity of violations. If there is only one distinct problem, return just one issue. If there are many different problems, return up to 5. Never repeat the same issue in different words.${platformInstruction}
 
 Violations:
 ${JSON.stringify(violations.slice(0, 10), null, 2)}
@@ -56,7 +80,7 @@ ${JSON.stringify(violations.slice(0, 10), null, 2)}
 Format your response as JSON:
 {
   "summary": "...",
-  "topIssues": ["issue 1", "...up to 5"]
+  "topIssues": ["issue 1", "...up to 5"]${platformJsonField}
 }
 `;
 
@@ -82,11 +106,18 @@ Format your response as JSON:
         ? response.topIssues.slice(0, 5)
         : [];
 
+      // Extract optional platform tip (only present when platform was detected)
+      const platformTip =
+        typeof response.platformTip === "string" && response.platformTip.trim()
+          ? response.platformTip.trim()
+          : undefined;
+
       // Update audit with AI results (status is already complete)
       await ctx.runMutation(api.audits.updateAuditAIOnly, {
         auditId: args.auditId,
         aiSummary: response.summary || "Analysis complete.",
         topIssues,
+        ...(platformTip ? { platformTip } : {}),
       });
     } catch (error: unknown) {
       console.error("AI analysis error:", error);

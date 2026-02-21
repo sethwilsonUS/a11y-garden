@@ -45,9 +45,14 @@ export default defineSchema({
     // Set when the raw violations payload was trimmed to fit the 500 KB cap
     truncated: v.optional(v.boolean()),
 
+    // Detected website platform/CMS (e.g. "wordpress", "squarespace")
+    platform: v.optional(v.string()),
+
     // AI-generated content
     aiSummary: v.optional(v.string()),
     topIssues: v.optional(v.array(v.string())),
+    // Platform-specific fix advice (only when platform is detected)
+    platformTip: v.optional(v.string()),
 
     // Raw data
     rawViolations: v.optional(v.string()),

@@ -42,13 +42,14 @@ import { Command } from "commander";
 import chalk from "chalk";
 import ora from "ora";
 import { scanUrl, ScanBlockedError } from "@/lib/scanner";
+import { PLATFORM_LABELS } from "@/lib/platforms";
 import { calculateGrade } from "@/lib/grading";
 import {
   generateMarkdownReport,
   type ReportData,
   type AxeViolation,
 } from "@/lib/report";
-import { generateAISummary } from "@/lib/ai-summary";
+import { generateAISummary, DEFAULT_AI_MODEL } from "@/lib/ai-summary";
 
 // ---------------------------------------------------------------------------
 // Terminal report formatter
@@ -108,6 +109,11 @@ function formatTerminalReport(data: ReportData): string {
     day: "numeric",
   });
   lines.push(`  ${chalk.dim("Scanned")}  ${date}`);
+
+  if (data.platform) {
+    const label = PLATFORM_LABELS[data.platform] ?? data.platform;
+    lines.push(`  ${chalk.dim("Platform")} ${label}`);
+  }
 
   if (data.scanMode === "safe") {
     lines.push("");
@@ -183,6 +189,28 @@ function formatTerminalReport(data: ReportData): string {
     for (let i = 0; i < data.topIssues.length; i++) {
       lines.push(`  ${chalk.bold(`${i + 1}.`)} ${data.topIssues[i]}`);
     }
+  }
+
+  // ---- Platform Tip -------------------------------------------------------
+  if (data.platformTip && data.platform) {
+    const label = PLATFORM_LABELS[data.platform] ?? data.platform;
+    lines.push("");
+    lines.push(divider);
+    lines.push("");
+    lines.push(chalk.bold(`  ${label} Tip`));
+    lines.push("");
+
+    // Word-wrap the tip at ~70 chars, indented by 2 spaces
+    const words = data.platformTip.split(" ");
+    let line = "  ";
+    for (const word of words) {
+      if (line.length + word.length + 1 > 72 && line.trim().length > 0) {
+        lines.push(line);
+        line = "  ";
+      }
+      line += (line.trim().length > 0 ? " " : "") + word;
+    }
+    if (line.trim().length > 0) lines.push(line);
   }
 
   // ---- Violations by rule -------------------------------------------------
@@ -369,6 +397,7 @@ program
       // --no-ai explicitly skips it; missing key silently degrades.
       let aiSummary: string | undefined;
       let topIssues: string[] | undefined;
+      let platformTip: string | undefined;
 
       const hasOpenAIKey = !!process.env.OPENAI_API_KEY;
       const wantsAI = options.ai && hasOpenAIKey;
@@ -388,9 +417,12 @@ program
         try {
           const aiResult = await generateAISummary(
             scanResult.rawViolations,
+            DEFAULT_AI_MODEL,
+            scanResult.platform,
           );
           aiSummary = aiResult.summary;
           topIssues = aiResult.topIssues;
+          platformTip = aiResult.platformTip;
           aiSpinner.succeed("AI analysis complete");
         } catch (error) {
           const msg =
@@ -415,6 +447,8 @@ program
         rawViolations: scanResult.rawViolations,
         ...(aiSummary !== undefined && { aiSummary }),
         ...(topIssues !== undefined && { topIssues }),
+        ...(scanResult.platform && { platform: scanResult.platform }),
+        ...(platformTip && { platformTip }),
       };
 
       // ---- Output -----------------------------------------------------------
@@ -427,6 +461,7 @@ program
           violations: scanResult.violations,
           safeMode: scanResult.safeMode,
           truncated: scanResult.truncated,
+          ...(scanResult.platform && { platform: scanResult.platform }),
           ...(aiSummary !== undefined && { aiSummary }),
           ...(topIssues !== undefined && { topIssues }),
           rawViolations: JSON.parse(scanResult.rawViolations),

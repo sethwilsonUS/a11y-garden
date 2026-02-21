@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   truncateViolations,
   ScanBlockedError,
+  PLATFORM_LABELS,
   type AxeViolationRaw,
   type ScanResult,
   type ScanOptions,
@@ -279,5 +280,74 @@ describe("ScanOptions type contract", () => {
 
     expect(opts.browserWSEndpoint).toBe("ws://localhost:3001");
     expect(opts.captureScreenshot).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PLATFORM_LABELS
+// ---------------------------------------------------------------------------
+
+describe("PLATFORM_LABELS", () => {
+  it("is a non-empty object", () => {
+    expect(Object.keys(PLATFORM_LABELS).length).toBeGreaterThan(0);
+  });
+
+  it("maps all expected platform slugs to display names", () => {
+    const expected = [
+      "wordpress",
+      "squarespace",
+      "shopify",
+      "wix",
+      "webflow",
+      "drupal",
+      "joomla",
+      "ghost",
+      "hubspot",
+      "weebly",
+    ];
+
+    for (const slug of expected) {
+      expect(PLATFORM_LABELS[slug]).toBeDefined();
+      expect(typeof PLATFORM_LABELS[slug]).toBe("string");
+      expect(PLATFORM_LABELS[slug].length).toBeGreaterThan(0);
+    }
+  });
+
+  it("uses properly capitalised display names", () => {
+    expect(PLATFORM_LABELS["wordpress"]).toBe("WordPress");
+    expect(PLATFORM_LABELS["squarespace"]).toBe("Squarespace");
+    expect(PLATFORM_LABELS["shopify"]).toBe("Shopify");
+    expect(PLATFORM_LABELS["hubspot"]).toBe("HubSpot");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ScanResult — platform field
+// ---------------------------------------------------------------------------
+
+describe("ScanResult platform field", () => {
+  it("allows ScanResult without platform (backwards-compatible)", () => {
+    const result: ScanResult = {
+      violations: { critical: 0, serious: 0, moderate: 0, minor: 0, total: 0 },
+      rawViolations: "[]",
+      pageTitle: "Test",
+      safeMode: false,
+      truncated: false,
+    };
+
+    expect(result.platform).toBeUndefined();
+  });
+
+  it("allows ScanResult with platform string", () => {
+    const result: ScanResult = {
+      violations: { critical: 0, serious: 0, moderate: 0, minor: 0, total: 0 },
+      rawViolations: "[]",
+      pageTitle: "Test",
+      safeMode: false,
+      truncated: false,
+      platform: "squarespace",
+    };
+
+    expect(result.platform).toBe("squarespace");
   });
 });

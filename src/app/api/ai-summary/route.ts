@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const { rawViolations, model } = await request.json();
+    const { rawViolations, model, platform } = await request.json();
 
     if (!rawViolations || typeof rawViolations !== "string") {
       return NextResponse.json(
@@ -54,7 +54,11 @@ export async function POST(request: NextRequest) {
     const selectedModel =
       model && validModelIds.includes(model) ? model : DEFAULT_AI_MODEL;
 
-    const result = await generateAISummary(rawViolations, selectedModel);
+    const result = await generateAISummary(
+      rawViolations,
+      selectedModel,
+      typeof platform === "string" ? platform : undefined,
+    );
 
     return NextResponse.json(result);
   } catch (error: unknown) {

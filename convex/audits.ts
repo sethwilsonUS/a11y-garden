@@ -205,6 +205,8 @@ export const updateAuditWithResults = mutation({
     truncated: v.optional(v.boolean()),
     // Screenshot of the scanned page (Convex file storage ID)
     screenshotId: v.optional(v.id("_storage")),
+    // Detected website platform/CMS (e.g. "wordpress", "squarespace")
+    platform: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     await verifyAuditOwnership(ctx, args.auditId);
@@ -256,12 +258,14 @@ export const updateAuditAIOnly = mutation({
     auditId: v.id("audits"),
     aiSummary: v.string(),
     topIssues: v.array(v.string()),
+    platformTip: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     await verifyAuditOwnership(ctx, args.auditId);
     await ctx.db.patch(args.auditId, {
       aiSummary: args.aiSummary,
       topIssues: args.topIssues,
+      ...(args.platformTip ? { platformTip: args.platformTip } : {}),
     });
   },
 });

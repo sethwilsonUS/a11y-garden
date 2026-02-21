@@ -41,6 +41,8 @@ interface ScanResult {
   aiSummary?: string;
   topIssues?: string[];
   aiModel?: string;
+  platform?: string;
+  platformTip?: string;
 }
 
 // Severity config using CSS vars
@@ -321,6 +323,7 @@ export default function DemoPage() {
         rawViolations: scanResult.rawViolations,
         safeMode: scanResult.safeMode,
         scannedAt: Date.now(),
+        ...(scanResult.platform && { platform: scanResult.platform }),
       };
 
       setResult(scanData);
@@ -337,13 +340,17 @@ export default function DemoPage() {
           const aiRes = await fetch("/api/ai-summary", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ rawViolations: scanResult.rawViolations, model: aiModel }),
+            body: JSON.stringify({
+              rawViolations: scanResult.rawViolations,
+              model: aiModel,
+              ...(scanResult.platform && { platform: scanResult.platform }),
+            }),
           });
 
           if (aiRes.ok) {
             const aiData = await aiRes.json();
             setResult((prev) =>
-              prev ? { ...prev, aiSummary: aiData.summary, topIssues: aiData.topIssues, aiModel: aiData.model } : prev,
+              prev ? { ...prev, aiSummary: aiData.summary, topIssues: aiData.topIssues, aiModel: aiData.model, ...(aiData.platformTip ? { platformTip: aiData.platformTip } : {}) } : prev,
             );
           }
           // Non-ok (501 = no key, 500 = error) — silently degrade
@@ -543,7 +550,19 @@ export default function DemoPage() {
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                   </svg>
                 </a>
-                <p className="text-sm text-theme-muted mt-2">Scanned just now</p>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2">
+                  <p className="text-sm text-theme-muted">Scanned just now</p>
+                  {result.platform && (
+                    <span className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full bg-theme-secondary border border-theme text-theme-secondary">
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
+                      </svg>
+                      Built with {
+                        ({ wordpress: "WordPress", squarespace: "Squarespace", shopify: "Shopify", wix: "Wix", webflow: "Webflow", drupal: "Drupal", joomla: "Joomla", ghost: "Ghost", hubspot: "HubSpot", weebly: "Weebly" } as Record<string, string>)[result.platform] ?? result.platform
+                      }
+                    </span>
+                  )}
+                </div>
               </div>
 
               <div className="flex flex-col items-center lg:items-end gap-2">

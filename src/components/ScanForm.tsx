@@ -171,6 +171,7 @@ export function ScanForm() {
         ...(scanResult.pageTitle ? { pageTitle: scanResult.pageTitle } : {}),
         ...(scanResult.truncated ? { truncated: true } : {}),
         ...(screenshotId ? { screenshotId } : {}),
+        ...(scanResult.platform ? { platform: scanResult.platform } : {}),
       });
 
       // Step 5: Fire off AI analysis in background (don't await)
