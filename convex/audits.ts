@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import { calculateGrade, GRADING_VERSION } from "./lib/grading";
+import { deduplicateByUrl } from "./lib/dedup";
 import { Id } from "./_generated/dataModel";
 import { MutationCtx, QueryCtx } from "./_generated/server";
 
@@ -121,20 +122,17 @@ export const getAudit = query({
   },
 });
 
-// Get all public audits (paginated)
+// Get all public audits, deduplicated by URL (latest per URL).
 export const getPublicAudits = query({
-  args: {
-    paginationOpts: v.object({
-      numItems: v.number(),
-      cursor: v.union(v.string(), v.null()),
-    }),
-  },
-  handler: async (ctx, args) => {
-    return await ctx.db
+  args: {},
+  handler: async (ctx) => {
+    const allPublic = await ctx.db
       .query("audits")
       .withIndex("by_public", (q) => q.eq("isPublic", true))
-      .order("desc")
-      .paginate(args.paginationOpts);
+      .filter((q) => q.eq(q.field("status"), "complete"))
+      .collect();
+
+    return deduplicateByUrl(allPublic);
   },
 });
 

@@ -4,26 +4,7 @@ import { useState, useMemo } from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import { AuditCard } from "@/components/AuditCard";
-
-type SortOption = "date" | "name" | "score";
-
-function sortAudits<T extends { domain: string; scannedAt: number; score: number }>(
-  audits: T[],
-  sortBy: SortOption
-): T[] {
-  return [...audits].sort((a, b) => {
-    switch (sortBy) {
-      case "name":
-        return a.domain.localeCompare(b.domain);
-      case "date":
-        return b.scannedAt - a.scannedAt;
-      case "score":
-        return b.score - a.score;
-      default:
-        return 0;
-    }
-  });
-}
+import { sortAudits, type SortOption } from "@/lib/audit-sort";
 
 function SeedlingIcon({ className }: { className?: string }) {
   return (
@@ -39,36 +20,22 @@ export default function DatabasePage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [sortBy, setSortBy] = useState<SortOption>("date");
 
-  const publicAudits = useQuery(api.audits.getPublicAudits, {
-    paginationOpts: { numItems: 200, cursor: null },
-  });
-
-  const auditsPage = publicAudits?.page;
+  const publicAudits = useQuery(api.audits.getPublicAudits);
 
   const displayAudits = useMemo(() => {
-    if (!auditsPage) return undefined;
-
-    // Deduplicate by full URL — keep only the latest audit per page
-    const latestByUrl = new Map<string, (typeof auditsPage)[number]>();
-    for (const audit of auditsPage) {
-      const existing = latestByUrl.get(audit.url);
-      if (!existing || audit.scannedAt > existing.scannedAt) {
-        latestByUrl.set(audit.url, audit);
-      }
-    }
-    const deduped = Array.from(latestByUrl.values());
+    if (!publicAudits) return undefined;
 
     const trimmedSearch = searchTerm.trim().toLowerCase();
 
     const filtered = trimmedSearch
-      ? deduped.filter((audit) =>
+      ? publicAudits.filter((audit) =>
           audit.domain.toLowerCase().includes(trimmedSearch) ||
           audit.url.toLowerCase().includes(trimmedSearch)
         )
-      : deduped;
+      : publicAudits;
 
     return sortAudits(filtered, sortBy);
-  }, [auditsPage, searchTerm, sortBy]);
+  }, [publicAudits, searchTerm, sortBy]);
 
   return (
     <div className="min-h-screen overflow-x-hidden">
@@ -188,7 +155,7 @@ export default function DatabasePage() {
         </div>
 
         {/* Stats */}
-        {publicAudits && publicAudits.page.length > 0 && !searchTerm && (
+        {publicAudits && publicAudits.length > 0 && !searchTerm && (
           <div className="max-w-4xl mx-auto mt-16 pt-8">
             <hr className="garden-divider" />
             <h2 className="text-xl font-display font-bold text-theme-primary text-center mb-8 mt-8">
@@ -197,25 +164,25 @@ export default function DatabasePage() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <div className="p-5 rounded-xl bg-theme-secondary border border-theme text-center">
                 <div className="text-3xl font-display font-bold text-accent mb-1">
-                  {publicAudits.page.length}
+                  {publicAudits.length}
                 </div>
                 <div className="text-sm text-theme-muted">Total Audits</div>
               </div>
               <div className="p-5 rounded-xl bg-theme-secondary border border-theme text-center">
                 <div className="text-3xl font-display font-bold text-accent mb-1">
-                  {new Set(publicAudits.page.map((a) => a.domain)).size}
+                  {new Set(publicAudits.map((a) => a.domain)).size}
                 </div>
                 <div className="text-sm text-theme-muted">Unique Domains</div>
               </div>
               <div className="p-5 rounded-xl bg-theme-secondary border border-theme text-center">
                 <div className="text-3xl font-display font-bold text-accent mb-1">
-                  {publicAudits.page.filter((a) => a.letterGrade === "A").length}
+                  {publicAudits.filter((a) => a.letterGrade === "A").length}
                 </div>
                 <div className="text-sm text-theme-muted">Thriving (A)</div>
               </div>
               <div className="p-5 rounded-xl bg-theme-secondary border border-theme text-center">
                 <div className="text-3xl font-display font-bold text-[var(--severity-critical)] mb-1">
-                  {publicAudits.page.filter((a) => a.letterGrade === "F").length}
+                  {publicAudits.filter((a) => a.letterGrade === "F").length}
                 </div>
                 <div className="text-sm text-theme-muted">Need Care (F)</div>
               </div>
