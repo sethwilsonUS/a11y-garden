@@ -12,6 +12,8 @@ const isPublicRoute = createRouteMatcher([
   "/sign-in(.*)",
   "/sign-up(.*)",
   "/api/(.*)",
+  "/opengraph-image(.*)",
+  "/twitter-image(.*)",
 ]);
 
 export default clerkMiddleware(async (auth, request) => {
