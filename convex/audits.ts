@@ -281,6 +281,34 @@ export const updateAuditAIOnly = mutation({
   },
 });
 
+// Delete an audit (owner only). Also removes the associated screenshot.
+export const deleteAudit = mutation({
+  args: {
+    auditId: v.id("audits"),
+  },
+  handler: async (ctx, args) => {
+    const audit = await verifyAuditOwnership(ctx, args.auditId);
+
+    if (audit.screenshotId) {
+      await ctx.storage.delete(audit.screenshotId);
+    }
+
+    await ctx.db.delete(args.auditId);
+  },
+});
+
+// Toggle public/private visibility of an audit (owner only).
+export const updateAuditVisibility = mutation({
+  args: {
+    auditId: v.id("audits"),
+    isPublic: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    await verifyAuditOwnership(ctx, args.auditId);
+    await ctx.db.patch(args.auditId, { isPublic: args.isPublic });
+  },
+});
+
 // Get recent audits for homepage
 export const getRecentAudits = query({
   args: { limit: v.optional(v.number()) },
@@ -355,14 +383,24 @@ export const getAuditHistory = query({
     excludeAuditId: v.optional(v.id("audits")),
   },
   handler: async (ctx, args) => {
+    const callerId = await getAuthUserId(ctx);
+
     const audits = await ctx.db
       .query("audits")
       .withIndex("by_url", (q) => q.eq("url", args.url))
-      .filter((q) => q.eq(q.field("status"), "complete"))
+      .filter((q) =>
+        q.and(
+          q.eq(q.field("status"), "complete"),
+          q.or(
+            q.eq(q.field("isPublic"), true),
+            // Let owners see their own private audits in the timeline
+            callerId ? q.eq(q.field("userId"), callerId) : q.eq(1, 0),
+          ),
+        ),
+      )
       .order("desc")
       .take(20);
 
-    // Exclude the current audit if specified
     if (args.excludeAuditId) {
       return audits.filter((a) => a._id !== args.excludeAuditId);
     }
