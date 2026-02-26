@@ -13,6 +13,7 @@ import { PLATFORM_LABELS } from "@/lib/platforms";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { use, useEffect, useRef, useState, useCallback } from "react";
+import { useAuth } from "@clerk/nextjs";
 import { SafeModeModal } from "@/components/SafeModeModal";
 import { ScreenshotSection } from "@/components/ScreenshotSection";
 
@@ -359,8 +360,9 @@ function AuditHistoryTimeline({
                 <Link
                   href={buildResultsUrl(pastAudit.url, pastAudit.scannedAt, pastAudit._id)}
                   className="flex-1 flex items-center justify-between py-2 group"
+                  aria-label={`${pastAudit.isPublic ? "Public" : "Private"} audit from ${new Date(pastAudit.scannedAt).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}, grade ${displayGrade}, score ${displayScore} out of 100`}
                 >
-                  <div>
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                     <span className="text-sm text-theme-secondary group-hover:text-accent transition-colors">
                       {new Date(pastAudit.scannedAt).toLocaleDateString("en-US", {
                         month: "short",
@@ -368,14 +370,34 @@ function AuditHistoryTimeline({
                         year: "numeric",
                       })}
                     </span>
-                    <span className="text-xs text-theme-muted ml-2">
+                    <span className="text-xs text-theme-muted">
                       Score: {displayScore}/100
                     </span>
                     {pastAudit.scanMode === "safe" && (
-                      <span className="text-xs text-theme-muted ml-2">(partial scan)</span>
+                      <span className="text-xs text-theme-muted">(partial scan)</span>
                     )}
+                    <span
+                      className={`inline-flex items-center gap-1 text-xs font-medium px-1.5 py-0.5 rounded-md ${
+                        pastAudit.isPublic
+                          ? "bg-[var(--accent-bg)] text-accent"
+                          : "bg-theme-tertiary text-theme-muted"
+                      }`}
+                      aria-hidden="true"
+                    >
+                      {pastAudit.isPublic ? (
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                        </svg>
+                      ) : (
+                        <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L3 3m6.878 6.878L21 21" />
+                        </svg>
+                      )}
+                      {pastAudit.isPublic ? "Public" : "Private"}
+                    </span>
                   </div>
-                  <svg className="w-4 h-4 text-theme-muted group-hover:text-accent transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <svg className="w-4 h-4 text-theme-muted group-hover:text-accent transition-colors flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                   </svg>
                 </Link>
@@ -396,15 +418,72 @@ export default function ResultsPage({
   const { segments } = use(params);
   const { auditId, isLegacy } = parseResultsSegments(segments);
   const router = useRouter();
+  const { userId } = useAuth();
 
   const audit = useQuery(api.audits.getAudit, {
     auditId: auditId as Id<"audits">,
   });
   const recalculateGrade = useMutation(api.audits.recalculateGrade);
+  const deleteAudit = useMutation(api.audits.deleteAudit);
+  const updateVisibility = useMutation(api.audits.updateAuditVisibility);
   const hasRecalculated = useRef(false);
   const hasRedirected = useRef(false);
   const [safeModeOpen, setSafeModeOpen] = useState(false);
   const closeSafeMode = useCallback(() => setSafeModeOpen(false), []);
+  const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [statusMessage, setStatusMessage] = useState("");
+  const deleteButtonRef = useRef<HTMLButtonElement>(null);
+  const deleteDialogRef = useRef<HTMLDialogElement>(null);
+  const deleteCancelRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    const el = deleteDialogRef.current;
+    if (!el) return;
+    if (showDeleteDialog && !el.open) {
+      el.showModal();
+      deleteCancelRef.current?.focus();
+    } else if (!showDeleteDialog && el.open) {
+      el.close();
+    }
+  }, [showDeleteDialog]);
+
+  const isOwner = !!(userId && audit?.userId && userId === audit.userId);
+
+  const showStatus = useCallback((msg: string) => {
+    setStatusMessage(msg);
+    const t = setTimeout(() => setStatusMessage(""), 4000);
+    return () => clearTimeout(t);
+  }, []);
+
+  const handleToggleVisibility = useCallback(async () => {
+    if (!audit) return;
+    try {
+      await updateVisibility({
+        auditId: audit._id,
+        isPublic: !audit.isPublic,
+      });
+      showStatus(audit.isPublic ? "Audit changed to private" : "Audit changed to public");
+    } catch {
+      showStatus("Failed to update visibility");
+    }
+  }, [audit, updateVisibility, showStatus]);
+
+  const handleDeleteConfirm = useCallback(async () => {
+    if (!audit) return;
+    try {
+      await deleteAudit({ auditId: audit._id });
+      showStatus("Audit deleted");
+      router.push("/dashboard");
+    } catch {
+      showStatus("Failed to delete audit");
+    }
+    setShowDeleteDialog(false);
+  }, [audit, deleteAudit, showStatus, router]);
+
+  const handleDeleteCancel = useCallback(() => {
+    setShowDeleteDialog(false);
+    deleteButtonRef.current?.focus();
+  }, []);
 
   // Silently upgrade legacy URLs to the pretty format once audit data loads
   useEffect(() => {
@@ -551,6 +630,11 @@ export default function ResultsPage({
     <div className="min-h-screen pb-16">
       <div className="container mx-auto px-4 py-8 lg:py-12">
         <div className="max-w-4xl mx-auto space-y-8">
+          {/* Live status region */}
+          <div aria-live="polite" className="sr-only" role="status">
+            {statusMessage}
+          </div>
+
           {/* Header */}
           <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6">
             <div>
@@ -627,6 +711,7 @@ export default function ResultsPage({
                 borderColor: 'var(--accent-border)',
               }}
               role="note"
+              aria-label="Private scan notice"
             >
               <div className="flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: 'var(--accent-bg)' }}>
                 <svg className="w-4 h-4 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
@@ -638,13 +723,113 @@ export default function ResultsPage({
                   Private Scan
                 </h3>
                 <p className="text-sm text-theme-secondary">
-                  This scan is not listed in the community garden.{" "}
+                  This result is <strong className="text-theme-primary font-medium">private</strong> &mdash; it will not appear in or be stored in the public database.
+                  Only people with this direct link can view it.{" "}
                   {!audit.userId && (
                     <>Bookmark this page to return to it later &mdash; private scans from guests aren&apos;t saved to an account.</>
                   )}
                 </p>
               </div>
             </div>
+          )}
+
+          {/* Owner Actions */}
+          {isOwner && (
+            <section aria-label="Audit actions" className="rounded-xl p-4 border border-theme bg-theme-secondary flex flex-wrap items-center gap-3">
+              <span className="text-sm text-theme-secondary mr-auto">
+                {audit.isPublic ? (
+                  <span className="inline-flex items-center gap-1.5">
+                    <svg className="w-4 h-4 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                    </svg>
+                    This audit is <strong className="font-semibold text-theme-primary">public</strong>
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5">
+                    <svg className="w-4 h-4 text-theme-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L3 3m6.878 6.878L21 21" />
+                    </svg>
+                    This audit is <strong className="font-semibold text-theme-primary">private</strong>
+                  </span>
+                )}
+              </span>
+              <button
+                onClick={handleToggleVisibility}
+                aria-pressed={audit.isPublic}
+                className="btn-secondary text-sm cursor-pointer"
+              >
+                {audit.isPublic ? (
+                  <>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L3 3m6.878 6.878L21 21" />
+                    </svg>
+                    Make Private
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                    </svg>
+                    Make Public
+                  </>
+                )}
+              </button>
+              <button
+                ref={deleteButtonRef}
+                onClick={() => setShowDeleteDialog(true)}
+                aria-label={`Delete audit for ${audit.domain}`}
+                className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold transition-colors cursor-pointer hover:bg-[var(--severity-critical-bg)] text-[var(--severity-critical)] border border-transparent hover:border-[var(--severity-critical-border)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                </svg>
+                Delete
+              </button>
+
+              <dialog
+                ref={deleteDialogRef}
+                role="alertdialog"
+                aria-labelledby="results-delete-dialog-title"
+                aria-describedby="results-delete-dialog-desc"
+                className="m-auto rounded-2xl p-0 backdrop:bg-black/50 bg-[var(--bg-primary)] border border-theme max-w-md w-[calc(100%-2rem)] shadow-xl"
+                onCancel={handleDeleteCancel}
+              >
+                <div className="p-6">
+                  <h2
+                    id="results-delete-dialog-title"
+                    className="text-lg font-display font-bold text-theme-primary mb-2"
+                  >
+                    Delete audit?
+                  </h2>
+                  <p
+                    id="results-delete-dialog-desc"
+                    className="text-sm text-theme-secondary mb-6"
+                  >
+                    This will permanently delete the audit for{" "}
+                    <strong className="text-theme-primary">{audit.domain}</strong>.
+                    This action cannot be undone.
+                  </p>
+                  <div className="flex gap-3 justify-end">
+                    <button
+                      ref={deleteCancelRef}
+                      onClick={handleDeleteCancel}
+                      className="btn-secondary text-sm"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={handleDeleteConfirm}
+                      className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold text-white transition-colors"
+                      style={{ backgroundColor: "var(--severity-critical)" }}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              </dialog>
+            </section>
           )}
 
           {/* Safe Mode Banner */}

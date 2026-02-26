@@ -9,7 +9,7 @@ import { buildResultsUrl } from "@/lib/urls";
 
 export function ScanForm() {
   const [url, setUrl] = useState("");
-  const [isPublic, setIsPublic] = useState(true);
+  const [isPublic, setIsPublic] = useState(false);
   const [error, setError] = useState("");
   const [rateLimitInfo, setRateLimitInfo] = useState<{
     message: string;
