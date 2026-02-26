@@ -10,6 +10,7 @@
 
 import type * as ai from "../ai.js";
 import type * as audits from "../audits.js";
+import type * as lib_dedup from "../lib/dedup.js";
 import type * as lib_grading from "../lib/grading.js";
 import type * as scanner from "../scanner.js";
 
@@ -22,6 +23,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   ai: typeof ai;
   audits: typeof audits;
+  "lib/dedup": typeof lib_dedup;
   "lib/grading": typeof lib_grading;
   scanner: typeof scanner;
 }>;
