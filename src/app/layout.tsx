@@ -46,6 +46,13 @@ export const metadata: Metadata = {
     "scanner",
     "a11y garden",
   ],
+  openGraph: {
+    type: "website",
+    siteName: "A11y Garden",
+  },
+  twitter: {
+    card: "summary_large_image",
+  },
 };
 
 export default function RootLayout({
