@@ -3,6 +3,7 @@ import { GradeBadge } from "./GradeBadge";
 import { Id } from "../../convex/_generated/dataModel";
 import { calculateGrade, GRADING_VERSION } from "@/lib/grading";
 import { buildResultsUrl } from "@/lib/urls";
+import { track } from "@/lib/analytics";
 
 interface AuditCardProps {
   audit: {
@@ -24,9 +25,11 @@ interface AuditCardProps {
       total: number;
     };
   };
+  /** When true, track clicks as Garden Audit Clicked (for Community Garden page) */
+  trackClick?: boolean;
 }
 
-export function AuditCard({ audit }: AuditCardProps) {
+export function AuditCard({ audit, trackClick }: AuditCardProps) {
   const isComplete = audit.status === "complete";
 
   // Calculate correct grade on-the-fly if using outdated algorithm
@@ -50,6 +53,9 @@ export function AuditCard({ audit }: AuditCardProps) {
     <Link
       href={buildResultsUrl(audit.url, audit.scannedAt, audit._id)}
       className="block group min-w-0"
+      onClick={() =>
+        trackClick && isComplete && track("Garden Audit Clicked", { grade: displayGrade })
+      }
     >
       <div className="garden-bed p-4 sm:p-5 transition-all duration-200 overflow-hidden">
         <div className="flex items-start justify-between gap-3 sm:gap-4">
