@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import { AuditCard } from "@/components/AuditCard";
 import { sortAudits, type SortOption } from "@/lib/audit-sort";
+import { track } from "@/lib/analytics";
 
 function SeedlingIcon({ className }: { className?: string }) {
   return (
@@ -36,6 +37,21 @@ export default function DatabasePage() {
 
     return sortAudits(filtered, sortBy);
   }, [publicAudits, searchTerm, sortBy]);
+
+  // Debounced Garden Search tracking (no query text — privacy)
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = null;
+    if (!searchTerm.trim()) return;
+    searchDebounceRef.current = setTimeout(() => {
+      track("Garden Search");
+      searchDebounceRef.current = null;
+    }, 500);
+    return () => {
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    };
+  }, [searchTerm]);
 
   return (
     <div className="min-h-screen overflow-x-hidden">
@@ -147,7 +163,7 @@ export default function DatabasePage() {
 
               <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {displayAudits.map((audit) => (
-                  <AuditCard key={audit._id} audit={audit} />
+                  <AuditCard key={audit._id} audit={audit} trackClick />
                 ))}
               </div>
             </>

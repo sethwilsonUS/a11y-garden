@@ -6,6 +6,7 @@ import { api } from "../../convex/_generated/api";
 import { useRouter } from "next/navigation";
 import { Id } from "../../convex/_generated/dataModel";
 import { buildResultsUrl } from "@/lib/urls";
+import { track } from "@/lib/analytics";
 
 export function ScanForm() {
   const [url, setUrl] = useState("");
@@ -56,6 +57,8 @@ export function ScanForm() {
       return;
     }
 
+    track("Scan Submitted", { isPublic });
+
     // ---- Self-scan warning (dev only) -----------------------------------------
     // In development without a remote browser (Browserless), the Next.js dev
     // server can deadlock when asked to scan its own origin. With Browserless,
@@ -95,6 +98,7 @@ export function ScanForm() {
 
       // Handle rate-limit (429) and capacity (503) with a friendlier UI
       if (response.status === 429 || response.status === 503) {
+        track("Scan Failed", { reason: "rate_limit" });
         const retryAfter = response.headers.get("Retry-After");
         setRateLimitInfo({
           message: scanResult.error,
@@ -107,6 +111,7 @@ export function ScanForm() {
 
       // Handle WAF / bot-block detection (403 with blocked flag)
       if (response.status === 403 && scanResult.blocked) {
+        track("Scan Failed", { reason: "waf" });
         setRateLimitInfo({
           message:
             "This site's firewall blocked our automated scanner, so we can't produce accurate results. Try a different URL.",
@@ -181,8 +186,13 @@ export function ScanForm() {
       // The exact scannedAt stored in Convex may differ by a few ms, but the
       // date segment (YYYY-MM-DD) will match. The legacy-redirect logic on the
       // results page ensures URLs stay canonical.
+      track("Scan Completed", {
+        grade: scanResult.letterGrade,
+        score: scanResult.score,
+      });
       router.push(buildResultsUrl(normalizedUrl, Date.now(), auditId));
     } catch (err: unknown) {
+      track("Scan Failed", { reason: "error" });
       const errorMessage = err instanceof Error ? err.message : "Failed to create audit";
       setError(errorMessage);
 

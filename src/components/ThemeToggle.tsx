@@ -1,14 +1,20 @@
 "use client";
 
 import { useTheme } from "./ThemeProvider";
+import { track } from "@/lib/analytics";
 
 export function ThemeToggle() {
   const { theme, toggleTheme } = useTheme();
   const isDark = theme === "dark";
 
+  const handleClick = () => {
+    track("Theme Toggle", { theme: isDark ? "light" : "dark" });
+    toggleTheme();
+  };
+
   return (
     <button
-      onClick={toggleTheme}
+      onClick={handleClick}
       className="relative p-2.5 rounded-xl bg-theme-secondary border border-theme hover:border-[var(--accent-border)] transition-all duration-300 group cursor-pointer"
       aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
       type="button"

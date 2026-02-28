@@ -8,6 +8,7 @@ import { AuditCard } from "@/components/AuditCard";
 import { Id } from "../../../convex/_generated/dataModel";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { track } from "@/lib/analytics";
 
 function DeleteConfirmDialog({
   auditDomain,
@@ -113,6 +114,9 @@ export default function DashboardPage() {
     async (auditId: Id<"audits">, currentlyPublic: boolean) => {
       try {
         await updateVisibility({ auditId, isPublic: !currentlyPublic });
+        track("Audit Visibility Toggle", {
+          to: currentlyPublic ? "private" : "public",
+        });
         showStatus(
           currentlyPublic
             ? "Audit changed to private"
@@ -129,6 +133,7 @@ export default function DashboardPage() {
     if (!deleteTarget) return;
     try {
       await deleteAudit({ auditId: deleteTarget.id });
+      track("Audit Deleted");
       showStatus("Audit deleted");
     } catch {
       showStatus("Failed to delete audit");

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { Id } from "../../convex/_generated/dataModel";
+import { track } from "@/lib/analytics";
 
 interface ScreenshotSectionProps {
   auditId: Id<"audits">;
@@ -59,7 +60,10 @@ export function ScreenshotSection({ auditId }: ScreenshotSectionProps) {
   return (
     <section className="garden-bed overflow-hidden">
       <button
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={() => {
+          if (!isOpen) track("Screenshot Expanded");
+          setIsOpen(!isOpen);
+        }}
         className="w-full px-6 py-4 flex items-center justify-between bg-theme-secondary hover:bg-theme-tertiary transition-colors cursor-pointer rounded-t-2xl"
         aria-expanded={isOpen}
         aria-controls="screenshot-panel"

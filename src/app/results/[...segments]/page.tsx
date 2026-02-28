@@ -16,6 +16,7 @@ import { use, useEffect, useRef, useState, useCallback } from "react";
 import { useAuth } from "@clerk/nextjs";
 import { SafeModeModal } from "@/components/SafeModeModal";
 import { ScreenshotSection } from "@/components/ScreenshotSection";
+import { track } from "@/lib/analytics";
 
 interface Audit extends ReportData {
   domain: string;
@@ -35,6 +36,7 @@ function CopyReportButton({ audit }: { audit: Audit }) {
   const [copied, setCopied] = useState(false);
 
   const handleCopy = () => {
+    track("Copy Report");
     const reportUrl = typeof window !== "undefined" ? window.location.href : undefined;
     const markdown = generateMarkdownReport(audit, reportUrl);
     navigator.clipboard.writeText(markdown);
@@ -462,6 +464,9 @@ export default function ResultsPage({
         auditId: audit._id,
         isPublic: !audit.isPublic,
       });
+      track("Audit Visibility Toggle", {
+        to: audit.isPublic ? "private" : "public",
+      });
       showStatus(audit.isPublic ? "Audit changed to private" : "Audit changed to public");
     } catch {
       showStatus("Failed to update visibility");
@@ -472,6 +477,7 @@ export default function ResultsPage({
     if (!audit) return;
     try {
       await deleteAudit({ auditId: audit._id });
+      track("Audit Deleted");
       showStatus("Audit deleted");
       router.push("/dashboard");
     } catch {
@@ -1028,6 +1034,7 @@ export default function ResultsPage({
             <CopyReportButton audit={audit} />
             <button
               onClick={() => {
+                track("Copy Link");
                 navigator.clipboard.writeText(window.location.href);
               }}
               className="btn-secondary cursor-pointer"
