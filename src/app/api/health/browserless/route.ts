@@ -9,6 +9,7 @@ interface HealthStatus {
   config: {
     hasToken: boolean;
     hasUrl: boolean;
+    hasCloudUrl: boolean;
     strategy: string;
   };
 }
@@ -17,10 +18,17 @@ async function checkBaas(): Promise<HealthStatus["baas"]> {
   const token = process.env.BROWSERLESS_TOKEN;
   if (!token) return { reachable: false, error: "BROWSERLESS_TOKEN not set" };
 
+  const baseWs =
+    process.env.BROWSERLESS_URL ||
+    "wss://production-sfo.browserless.io";
+  const baseHttp = baseWs
+    .replace(/^wss:/, "https:")
+    .replace(/^ws:/, "http:");
+
   const start = Date.now();
   try {
     const res = await fetch(
-      `https://chrome.browserless.io/config?token=${token}`,
+      `${baseHttp}/config?token=${token}`,
       { signal: AbortSignal.timeout(5_000) },
     );
     return {
@@ -86,6 +94,7 @@ export async function GET() {
     config: {
       hasToken: !!process.env.BROWSERLESS_TOKEN,
       hasUrl: !!process.env.BROWSERLESS_URL,
+      hasCloudUrl: !!process.env.BROWSERLESS_CLOUD_URL,
       strategy: process.env.SCAN_STRATEGY ?? "(auto-detected)",
     },
   };

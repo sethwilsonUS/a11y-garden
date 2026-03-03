@@ -24,7 +24,11 @@ export class PlaywrightBaaSStrategy implements ScanStrategy {
         "PlaywrightBaaSStrategy requires BROWSERLESS_TOKEN to be set",
       );
     }
-    this.browserWSEndpoint = `wss://chrome.browserless.io?token=${token}`;
+    const baseUrl =
+      process.env.BROWSERLESS_URL ||
+      "wss://production-sfo.browserless.io";
+    const sep = baseUrl.includes("?") ? "&" : "?";
+    this.browserWSEndpoint = `${baseUrl}${sep}token=${token}`;
   }
 
   async scan(
