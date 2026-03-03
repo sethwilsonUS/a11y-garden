@@ -27,10 +27,8 @@ export class PlaywrightBaaSStrategy implements ScanStrategy {
     const baseUrl =
       process.env.BROWSERLESS_URL ||
       "wss://production-sfo.browserless.io";
-    const hasPath = new URL(baseUrl).pathname !== "/";
-    const wsUrl = hasPath ? baseUrl : `${baseUrl}/chromium/playwright`;
-    const sep = wsUrl.includes("?") ? "&" : "?";
-    this.browserWSEndpoint = `${wsUrl}${sep}token=${token}`;
+    const sep = baseUrl.includes("?") ? "&" : "?";
+    this.browserWSEndpoint = `${baseUrl}${sep}token=${token}`;
   }
 
   async scan(

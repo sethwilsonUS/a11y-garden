@@ -25,28 +25,24 @@ async function checkBaas(): Promise<HealthStatus["baas"]> {
     .replace(/^wss:/, "https:")
     .replace(/^ws:/, "http:");
 
-  const parsed = new URL(baseHttp);
-  const hasCustomPath = parsed.pathname !== "/";
-  const httpBase = hasCustomPath ? baseHttp : `${baseHttp}/chromium/playwright`;
-
   const start = Date.now();
   try {
     const res = await fetch(
-      `${httpBase}?token=${token}`,
-      { method: "HEAD", signal: AbortSignal.timeout(5_000) },
+      `${baseHttp}/json/version?token=${token}`,
+      { signal: AbortSignal.timeout(5_000) },
     );
-    const reachable = res.status !== 404;
+    const reachable = res.ok;
     return {
       reachable,
       latencyMs: Date.now() - start,
-      endpoint: httpBase,
+      endpoint: baseHttp,
       ...(reachable ? {} : { error: `HTTP ${res.status}` }),
     };
   } catch (err) {
     return {
       reachable: false,
       latencyMs: Date.now() - start,
-      endpoint: httpBase,
+      endpoint: baseHttp,
       error: err instanceof Error ? err.message : "Unknown error",
     };
   }
