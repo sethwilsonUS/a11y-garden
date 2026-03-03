@@ -241,7 +241,7 @@ export const updateAuditWithResults = mutation({
       errorMessage: undefined,
     });
 
-    // Reuse agent plan from a previous audit if violations are identical
+    // Reuse AI content from a previous audit if violations are identical
     const audit = await ctx.db.get(auditId);
     if (audit && args.status === "complete") {
       const previous = await ctx.db
@@ -251,21 +251,34 @@ export const updateAuditWithResults = mutation({
           q.and(
             q.neq(q.field("_id"), auditId),
             q.eq(q.field("status"), "complete"),
-            q.neq(q.field("agentPlanFileId"), undefined),
           ),
         )
         .order("desc")
         .first();
 
       if (
-        previous?.agentPlanFileId &&
+        previous &&
         previous.rawViolations === args.rawViolations &&
         (previous.mobileRawViolations ?? null) === (args.mobileRawViolations ?? null)
       ) {
-        await ctx.db.patch(auditId, {
-          agentPlanFileId: previous.agentPlanFileId,
-          agentPlanGeneratedAt: previous.agentPlanGeneratedAt,
-        });
+        const reused: Record<string, unknown> = {};
+
+        if (previous.aiSummary) {
+          reused.aiSummary = previous.aiSummary;
+          reused.topIssues = previous.topIssues;
+          if (previous.platformTip) reused.platformTip = previous.platformTip;
+          if (previous.mobileAiSummary) reused.mobileAiSummary = previous.mobileAiSummary;
+          if (previous.mobileTopIssues) reused.mobileTopIssues = previous.mobileTopIssues;
+        }
+
+        if (previous.agentPlanFileId) {
+          reused.agentPlanFileId = previous.agentPlanFileId;
+          reused.agentPlanGeneratedAt = previous.agentPlanGeneratedAt;
+        }
+
+        if (Object.keys(reused).length > 0) {
+          await ctx.db.patch(auditId, reused);
+        }
       }
     }
   },
