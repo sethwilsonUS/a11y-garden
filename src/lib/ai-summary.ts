@@ -71,6 +71,7 @@ export async function generateAISummary(
   rawViolations: string,
   model: string = DEFAULT_AI_MODEL,
   platform?: string,
+  viewport: "desktop" | "mobile" = "desktop",
 ): Promise<AISummaryResult> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -112,10 +113,15 @@ export async function generateAISummary(
     ? `\n  "platformTip": "Specific ${platformName} advice..."`
     : "";
 
+  const viewportContext = viewport === "mobile"
+    ? `\nThese violations were found at a mobile viewport (390×844, iPhone). Focus your summary and recommendations on mobile-specific impact — touch target sizes, tap spacing, text readability at small screens, viewport zoom restrictions, and responsive layout issues. Mention when violations would primarily affect mobile users.`
+    : `\nThese violations were found at a desktop viewport (1920×1080). Focus your summary and recommendations on desktop-specific impact — keyboard navigation, screen reader compatibility, focus indicators, and hover interactions.`;
+
   const userPrompt = `
 Analyze these accessibility violations and provide:
 1. A 2-3 sentence summary of the overall accessibility state
 2. The most important issues to address, as a JSON array called "topIssues". Each entry should be a brief, one-line description with user impact. Include between 1 and 5 issues — use your judgment based on the number and diversity of violations. If there is only one distinct problem, return just one issue. If there are many different problems, return up to 5. Never repeat the same issue in different words.${platformInstruction}
+${viewportContext}
 
 Violations:
 ${JSON.stringify(violations.slice(0, 10), null, 2)}

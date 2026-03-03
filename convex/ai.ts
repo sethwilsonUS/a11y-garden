@@ -64,6 +64,7 @@ export const analyzeViolations = action({
         violationsSlice: unknown[],
         pName: string | null,
         isMediumConfidence: boolean,
+        viewport: "desktop" | "mobile" = "desktop",
       ): string {
         const confidenceHedge = isMediumConfidence
           ? ` (Note: the site appears to use ${pName} based on HTML markers, but we're not 100% certain — frame your advice accordingly.)`
@@ -75,10 +76,15 @@ export const analyzeViolations = action({
           ? `\n  "platformTip": "Specific ${pName} advice..."`
           : "";
 
+        const viewportContext = viewport === "mobile"
+          ? `\nThese violations were found at a mobile viewport (390×844, iPhone). Focus your summary and recommendations on mobile-specific impact — touch target sizes, tap spacing, text readability at small screens, viewport zoom restrictions, and responsive layout issues. Mention when violations would primarily affect mobile users.`
+          : `\nThese violations were found at a desktop viewport (1920×1080). Focus your summary and recommendations on desktop-specific impact — keyboard navigation, screen reader compatibility, focus indicators, and hover interactions.`;
+
         return `
 Analyze these accessibility violations and provide:
 1. A 2-3 sentence summary of the overall accessibility state
 2. The most important issues to address, as a JSON array called "topIssues". Each entry should be a brief, one-line description with user impact. Include between 1 and 5 issues — use your judgment based on the number and diversity of violations. If there is only one distinct problem, return just one issue. If there are many different problems, return up to 5. Never repeat the same issue in different words.${platformInstruction}
+${viewportContext}
 
 Violations:
 ${JSON.stringify(violationsSlice, null, 2)}
@@ -96,8 +102,9 @@ Format your response as JSON:
         violationsJson: unknown[],
         pName: string | null,
         isMediumConf: boolean,
+        viewport: "desktop" | "mobile" = "desktop",
       ): Promise<{ summary: string; topIssues: string[]; platformTip?: string }> {
-        const prompt = buildUserPrompt(violationsJson, pName, isMediumConf);
+        const prompt = buildUserPrompt(violationsJson, pName, isMediumConf, viewport);
         const completion = await openaiClient.chat.completions.create({
           model: "gpt-4.1-mini",
           messages: [
@@ -134,10 +141,10 @@ Format your response as JSON:
 
       const [desktopResult, mobileResult] = await Promise.all([
         violations.length > 0
-          ? analyzeViewport(openai, violations.slice(0, 10), platformName, isMediumConfidence)
+          ? analyzeViewport(openai, violations.slice(0, 10), platformName, isMediumConfidence, "desktop")
           : Promise.resolve({ summary: POSITIVE_SUMMARY, topIssues: [] as string[] }),
         hasMobileData && mobileViolations.length > 0
-          ? analyzeViewport(openai, mobileViolations.slice(0, 10), null, false)
+          ? analyzeViewport(openai, mobileViolations.slice(0, 10), null, false, "mobile")
           : Promise.resolve(undefined),
       ]);
 
