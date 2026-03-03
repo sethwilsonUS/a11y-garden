@@ -111,22 +111,22 @@ describe("AgentPlanButton", () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe("button states", () => {
-    it("renders 'Generate AI Fix Plan' when agentPlanFileId is null/undefined", () => {
+    it("renders 'Generate AGENTS.md' when agentPlanFileId is null/undefined", () => {
       render(
         <AgentPlanButton
           {...makeAuditProps({ agentPlanFileId: undefined })}
         />,
       );
-      expect(screen.getByText("Generate AI Fix Plan")).toBeInTheDocument();
+      expect(screen.getByText("Generate AGENTS.md")).toBeInTheDocument();
     });
 
-    it("renders 'View AI Fix Plan' and 'Download ZIP' when agentPlanFileId is present", () => {
+    it("renders 'View AGENTS.md' and 'Download ZIP' when agentPlanFileId is present", () => {
       render(
         <AgentPlanButton
           {...makeAuditProps({ agentPlanFileId: "storage-abc" })}
         />,
       );
-      expect(screen.getByText("View AI Fix Plan")).toBeInTheDocument();
+      expect(screen.getByText("View AGENTS.md")).toBeInTheDocument();
       expect(screen.getByText("Download ZIP")).toBeInTheDocument();
     });
   });
