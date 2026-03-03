@@ -7,6 +7,8 @@
 
 import { chromium } from "playwright";
 import axe from "axe-core";
+import type { ScanModeInfo } from "./scan/strategies/types";
+import { SAFE_MODE_SKIPPED_CATEGORIES } from "./scan/rules/categories";
 
 // ---------------------------------------------------------------------------
 // axe-core source loading
@@ -223,7 +225,7 @@ const STEALTH_INIT_SCRIPT = () => {
 
 export const DESKTOP_CONFIG = {
   viewport: { width: 1920, height: 1080 },
-  userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 A11yGarden/1.0 (accessibility audit; +https://a11ygarden.com/about)",
   extraHTTPHeaders: {
     "Accept-Language": "en-US,en;q=0.9",
     "Sec-CH-UA": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
@@ -234,7 +236,7 @@ export const DESKTOP_CONFIG = {
 
 export const MOBILE_CONFIG = {
   viewport: { width: 390, height: 844 },
-  userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+  userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1 A11yGarden/1.0 (accessibility audit; +https://a11ygarden.com/about)",
   isMobile: true,
   hasTouch: true,
   deviceScaleFactor: 3,
@@ -255,12 +257,19 @@ export class ScanBlockedError extends Error {
   public readonly blocked = true;
   public readonly pageTitle: string;
   public readonly httpStatus: number;
+  public readonly requiresAuth: boolean;
 
-  constructor(message: string, pageTitle: string, httpStatus: number) {
+  constructor(
+    message: string,
+    pageTitle: string,
+    httpStatus: number,
+    requiresAuth = false,
+  ) {
     super(message);
     this.name = "ScanBlockedError";
     this.pageTitle = pageTitle;
     this.httpStatus = httpStatus;
+    this.requiresAuth = requiresAuth;
   }
 }
 
@@ -289,6 +298,8 @@ export interface ScanResult {
   screenshotWarning?: string;
   /** Detected website platform/CMS (e.g. "wordpress", "squarespace"). */
   platform?: string;
+  /** Structured scan mode info (full, safe-rules, or jsdom-structural). */
+  scanModeInfo?: ScanModeInfo;
 }
 
 export interface ScanOptions {
@@ -296,6 +307,8 @@ export interface ScanOptions {
   browserWSEndpoint?: string;
   /** When true, capture a JPEG screenshot of the page before running axe-core. */
   captureScreenshot?: boolean;
+  /** Viewport to scan. Defaults to "desktop". */
+  viewport?: "desktop" | "mobile";
 }
 
 export interface ViewportScanResult {
@@ -306,6 +319,7 @@ export interface ViewportScanResult {
   screenshot?: Buffer;
   screenshotWarning?: string;
   warning?: string;
+  scanModeInfo?: ScanModeInfo;
 }
 
 export interface DualScanResult {
@@ -605,6 +619,32 @@ const SAFE_RULES = [
 ];
 
 // ---------------------------------------------------------------------------
+// ScanModeInfo builders
+// ---------------------------------------------------------------------------
+
+export { type ScanModeInfo } from "./scan/strategies/types";
+
+function buildFullScanMode(rulesRun: number): ScanModeInfo {
+  return { mode: "full", rulesRun, skippedCategories: [] };
+}
+
+function buildSafeRulesScanMode(
+  rulesRun: number,
+  errorMessage: string,
+): ScanModeInfo {
+  return {
+    mode: "safe-rules",
+    reason: `Full scan failed: ${errorMessage}. Fell back to safe rule subset.`,
+    rulesRun,
+    skippedCategories: SAFE_MODE_SKIPPED_CATEGORIES.map((c) => ({
+      name: c.name,
+      reason: c.reason,
+      ruleIds: [...c.ruleIds],
+    })),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Reusable helpers for scan functions
 // ---------------------------------------------------------------------------
 
@@ -667,11 +707,13 @@ async function runAxeOnPage(
   safeMode: boolean;
   truncated: boolean;
   warning?: string;
+  scanModeInfo: ScanModeInfo;
 }> {
   await page.evaluate(axeSource);
 
   let results;
   let usedSafeMode = false;
+  let fullScanError = "";
 
   const fullScanResult = await page
     .evaluate(async () => {
@@ -683,7 +725,8 @@ async function runAxeOnPage(
     .catch((error: Error) => ({ error: error.message }));
 
   if ("error" in fullScanResult && fullScanResult.error) {
-    console.error(`Full scan failed (${fullScanResult.error}), retrying with safe rules...`);
+    fullScanError = fullScanResult.error;
+    console.error(`Full scan failed (${fullScanError}), retrying with safe rules...`);
 
     results = await page
       .evaluate(async (rules: string[]) => {
@@ -747,7 +790,16 @@ async function runAxeOnPage(
     results.violations as AxeViolationRaw[],
   );
 
-  return { violations, rawViolations, safeMode: usedSafeMode, truncated, ...(warning && { warning }) };
+  const rulesRun = results.violations.length + (results.passes?.length ?? 0);
+  const scanModeInfo = usedSafeMode
+    ? buildSafeRulesScanMode(rulesRun, fullScanError)
+    : buildFullScanMode(rulesRun);
+
+  return {
+    violations, rawViolations, safeMode: usedSafeMode, truncated,
+    scanModeInfo,
+    ...(warning && { warning }),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -779,6 +831,7 @@ export async function scanUrl(
 
   try {
     const isRemoteBrowser = !!options.browserWSEndpoint;
+    const vpConfig = options.viewport === "mobile" ? MOBILE_CONFIG : DESKTOP_CONFIG;
 
     // Use a realistic viewport and user agent to avoid bot detection.
     // ignoreHTTPSErrors: sites with expired/self-signed certs should still
@@ -787,18 +840,13 @@ export async function scanUrl(
     // always evaluate prefers-color-scheme identically.
     const context = await browser.newContext({
       ignoreHTTPSErrors: true,
-      viewport: { width: 1920, height: 1080 },
+      viewport: vpConfig.viewport,
       colorScheme: "light",
-      userAgent:
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      // Extra headers real browsers send
-      extraHTTPHeaders: {
-        "Accept-Language": "en-US,en;q=0.9",
-        "Sec-CH-UA":
-          '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-        "Sec-CH-UA-Mobile": "?0",
-        "Sec-CH-UA-Platform": '"macOS"',
-      },
+      userAgent: vpConfig.userAgent,
+      ...("isMobile" in vpConfig ? { isMobile: vpConfig.isMobile } : {}),
+      ...("hasTouch" in vpConfig ? { hasTouch: vpConfig.hasTouch } : {}),
+      ...("deviceScaleFactor" in vpConfig ? { deviceScaleFactor: vpConfig.deviceScaleFactor } : {}),
+      extraHTTPHeaders: { ...vpConfig.extraHTTPHeaders },
     });
     const page = await context.newPage();
 
@@ -889,7 +937,7 @@ export async function scanUrl(
         // haven't finished rendering yet (e.g. SPAs, pages behind auth).
         // Sample pixels from the raw JPEG buffer; if they're all near-white,
         // wait longer and retry once.
-        if (screenshot && isLikelyBlankScreenshot(screenshot)) {
+        if (screenshot && isLikelyBlankScreenshot(screenshot, vpConfig.viewport.width)) {
           // Retry: give the page more time to render
           await page.waitForTimeout(4000);
           const retryScreenshot = await page.screenshot({
@@ -897,7 +945,7 @@ export async function scanUrl(
             quality: 75,
             fullPage: false,
           });
-          if (retryScreenshot && !isLikelyBlankScreenshot(retryScreenshot)) {
+          if (retryScreenshot && !isLikelyBlankScreenshot(retryScreenshot, vpConfig.viewport.width)) {
             screenshot = retryScreenshot;
           } else {
             // Still blank after retry — keep it but flag a warning
@@ -911,132 +959,13 @@ export async function scanUrl(
       }
     }
 
-    // Inject axe-core into the page via evaluate (works regardless of CSP)
+    // Run axe-core (full scan first, falls back to safe rules if it crashes)
     const axeSource = await getAxeCoreSource();
-    await page.evaluate(axeSource);
-
-    // Try full scan first, fall back to safe rules if it crashes
-    // This gives complete results for simple sites, partial for complex ones
-    let results;
-    let usedSafeMode = false;
-
-    // First attempt: full scan with all rules
-    const fullScanResult = await page
-      .evaluate(async () => {
-        // @ts-expect-error axe is injected globally
-        const axe = window.axe;
-        axe.reset();
-        return await axe.run(document.body, {
-          resultTypes: ["violations"],
-        });
-      })
-      .catch((error: Error) => {
-        return { error: error.message };
-      });
-
-    if ("error" in fullScanResult && fullScanResult.error) {
-      // Full scan failed — likely color-contrast on complex sites
-      // Retry with safe rules only
-      console.error(
-        `Full scan failed (${fullScanResult.error}), retrying with safe rules...`,
-      );
-
-      results = await page
-        .evaluate(async (rules: string[]) => {
-          // @ts-expect-error axe is injected globally
-          const axe = window.axe;
-          axe.reset();
-
-          try {
-            return await axe.run(document.body, {
-              runOnly: {
-                type: "rule",
-                values: rules,
-              },
-              resultTypes: ["violations"],
-              // Disable element references to avoid serialization issues
-              elementRef: false,
-            });
-          } catch (e) {
-            // Safe mode also failed — try minimal scan on main content
-            console.error("Safe mode failed, trying minimal scan:", e);
-
-            const mainEl =
-              document.querySelector("main") ||
-              document.querySelector("article") ||
-              document.querySelector("#content") ||
-              document.querySelector("#main");
-
-            if (mainEl) {
-              try {
-                return await axe.run(mainEl, {
-                  runOnly: {
-                    type: "rule",
-                    values: [
-                      "image-alt",
-                      "link-name",
-                      "button-name",
-                      "label",
-                      "document-title",
-                    ],
-                  },
-                  resultTypes: ["violations"],
-                  elementRef: false,
-                });
-              } catch {
-                // Even minimal scan failed
-              }
-            }
-
-            // Return empty results with warning
-            return {
-              violations: [],
-              _warning: "Site too complex for automated scanning",
-            };
-          }
-        }, SAFE_RULES)
-        .catch((error: Error) => {
-          return { error: error.message, violations: [] };
-        });
-
-      usedSafeMode = true;
-    } else {
-      results = fullScanResult;
-    }
-
-    // Check if axe-core encountered an error
-    if ("error" in results && results.error) {
-      throw new Error(`Accessibility scan failed: ${results.error}`);
-    }
-
-    // Check for warning (site was too complex, returning empty results)
-    const warning =
-      "_warning" in results ? (results._warning as string) : undefined;
-
-    // Count violations by severity
-    const violations: ViolationCounts = {
-      critical: 0,
-      serious: 0,
-      moderate: 0,
-      minor: 0,
-      total: results.violations.length,
-    };
-
-    results.violations.forEach((violation: { impact?: string }) => {
-      if (violation.impact === "critical") violations.critical++;
-      else if (violation.impact === "serious") violations.serious++;
-      else if (violation.impact === "moderate") violations.moderate++;
-      else violations.minor++;
-    });
-
-    // Truncate raw violations if they exceed the 350 KB cap
-    const { serialized: rawViolations, truncated } = truncateViolations(
-      results.violations as AxeViolationRaw[],
-    );
+    const axeResult = await runAxeOnPage(page, axeSource);
 
     // Combine warnings (scan warnings + Docker rewrite notice)
     const combinedWarnings = [
-      warning,
+      axeResult.warning,
       urlRewritten
         ? `URL rewritten from localhost to host.docker.internal for Docker-based browser.`
         : undefined,
@@ -1045,11 +974,12 @@ export async function scanUrl(
       .join(" ");
 
     return {
-      violations,
-      rawViolations,
+      violations: axeResult.violations,
+      rawViolations: axeResult.rawViolations,
       pageTitle,
-      safeMode: usedSafeMode,
-      truncated,
+      safeMode: axeResult.safeMode,
+      truncated: axeResult.truncated,
+      scanModeInfo: axeResult.scanModeInfo,
       ...(combinedWarnings && { warning: combinedWarnings }),
       ...(screenshot && { screenshot }),
       ...(screenshotWarning && { screenshotWarning }),

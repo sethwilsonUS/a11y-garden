@@ -109,12 +109,14 @@ export function ScanForm() {
         return;
       }
 
-      // Handle WAF / bot-block detection (403 with blocked flag)
       if (response.status === 403 && scanResult.blocked) {
-        track("Scan Failed", { reason: "waf" });
+        track("Scan Failed", {
+          reason: scanResult.requiresAuth ? "waf_auth_required" : "waf",
+        });
         setRateLimitInfo({
-          message:
-            "This site's firewall blocked our automated scanner, so we can't produce accurate results. Try a different URL.",
+          message: scanResult.requiresAuth
+            ? "This site's firewall blocked our scanner. Sign in to unlock firewall bypass and get results."
+            : "This site's firewall blocked our automated scanner, so we can't produce accurate results. Try a different URL.",
         });
         setIsSubmitting(false);
         setScanStatus("");
@@ -181,21 +183,32 @@ export function ScanForm() {
         gradingVersion: scanResult.gradingVersion,
         rawViolations: scanResult.desktop.rawViolations,
         status: "complete",
-        scanMode: scanResult.desktop.safeMode ? "safe" : "full",
+        scanMode: scanResult.desktop.scanMode ?? (scanResult.desktop.safeMode ? "safe" : "full"),
+        ...(scanResult.desktop.scanModeDetail
+          ? { scanModeDetail: JSON.stringify(scanResult.desktop.scanModeDetail) }
+          : {}),
+        ...(scanResult.scanStrategy ? { scanStrategy: scanResult.scanStrategy } : {}),
+        ...(scanResult.wafDetected != null ? { wafDetected: scanResult.wafDetected } : {}),
+        ...(scanResult.wafType !== undefined ? { wafType: scanResult.wafType } : {}),
+        ...(scanResult.wafBypassed != null ? { wafBypassed: scanResult.wafBypassed } : {}),
+        ...(scanResult.scanDurationMs != null ? { scanDurationMs: scanResult.scanDurationMs } : {}),
         ...(scanResult.pageTitle ? { pageTitle: scanResult.pageTitle } : {}),
         ...(scanResult.desktop.truncated ? { truncated: true } : {}),
         ...(screenshotId ? { screenshotId } : {}),
         ...(scanResult.platform ? { platform: scanResult.platform } : {}),
-        // Mobile viewport fields
         ...(scanResult.mobile ? {
           mobileViolations: scanResult.mobile.violations,
           mobileLetterGrade: scanResult.mobile.letterGrade,
           mobileScore: scanResult.mobile.score,
           mobileRawViolations: scanResult.mobile.rawViolations,
-          mobileScanMode: scanResult.mobile.safeMode ? ("safe" as const) : ("full" as const),
+          mobileScanMode: scanResult.mobile.scanMode ?? (scanResult.mobile.safeMode ? ("safe" as const) : ("full" as const)),
+          ...(scanResult.mobile.scanModeDetail
+            ? { mobileScanModeDetail: JSON.stringify(scanResult.mobile.scanModeDetail) }
+            : {}),
           ...(scanResult.mobile.truncated ? { mobileTruncated: true } : {}),
           ...(mobileScreenshotId ? { mobileScreenshotId } : {}),
         } : {}),
+        ...(scanResult.robotsDisallowed ? { robotsDisallowed: true } : {}),
       });
 
       // Step 5: Fire off AI analysis in background (don't await)

@@ -206,8 +206,23 @@ export const updateAuditWithResults = mutation({
       v.literal("complete"),
       v.literal("error")
     ),
-    // Scan mode: "full" = all rules, "safe" = fallback rules (color-contrast skipped)
-    scanMode: v.optional(v.union(v.literal("full"), v.literal("safe"))),
+    // Scan mode: "full" = all rules, "safe" = fallback rules, "jsdom-structural" = BQL WAF bypass
+    scanMode: v.optional(v.union(v.literal("full"), v.literal("safe"), v.literal("jsdom-structural"))),
+    // JSON-serialized ScanModeInfo for detailed skip reporting
+    scanModeDetail: v.optional(v.string()),
+    // Strategy metadata
+    scanStrategy: v.optional(
+      v.union(
+        v.literal("baas"),
+        v.literal("bql-stealth"),
+        v.literal("bql-proxy"),
+        v.literal("failed"),
+      ),
+    ),
+    wafDetected: v.optional(v.boolean()),
+    wafType: v.optional(v.string()),
+    wafBypassed: v.optional(v.boolean()),
+    scanDurationMs: v.optional(v.number()),
     // Page title scraped from the site's <title> tag
     pageTitle: v.optional(v.string()),
     // True when raw violations were trimmed to fit the 500 KB size cap
@@ -230,8 +245,11 @@ export const updateAuditWithResults = mutation({
     mobileScore: v.optional(v.number()),
     mobileRawViolations: v.optional(v.string()),
     mobileScreenshotId: v.optional(v.id("_storage")),
-    mobileScanMode: v.optional(v.union(v.literal("full"), v.literal("safe"))),
+    mobileScanMode: v.optional(v.union(v.literal("full"), v.literal("safe"), v.literal("jsdom-structural"))),
+    mobileScanModeDetail: v.optional(v.string()),
     mobileTruncated: v.optional(v.boolean()),
+    // robots.txt advisory
+    robotsDisallowed: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     await verifyAuditOwnership(ctx, args.auditId);

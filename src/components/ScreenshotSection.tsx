@@ -9,6 +9,7 @@ import { track } from "@/lib/analytics";
 interface ScreenshotSectionProps {
   auditId: Id<"audits">;
   viewport?: "desktop" | "mobile";
+  scanMode?: "full" | "safe" | "jsdom-structural";
 }
 
 /**
@@ -20,7 +21,7 @@ interface ScreenshotSectionProps {
  *  - No screenshot (null)      → subtle "not available" note
  *  - Screenshot available (URL) → collapsible image viewer
  */
-export function ScreenshotSection({ auditId, viewport = "desktop" }: ScreenshotSectionProps) {
+export function ScreenshotSection({ auditId, viewport = "desktop", scanMode }: ScreenshotSectionProps) {
   const [isOpen, setIsOpen] = useState(false);
   const desktopUrl = useQuery(api.audits.getScreenshotUrl, { auditId });
   const mobileUrl = useQuery(api.audits.getMobileScreenshotUrl, { auditId });
@@ -56,7 +57,11 @@ export function ScreenshotSection({ auditId, viewport = "desktop" }: ScreenshotS
           />
         </svg>
         <p>
-          No {isMobile ? "mobile " : ""}screenshot available for this scan — this audit may predate the screenshot feature, or the capture didn&apos;t complete.
+          {scanMode === "jsdom-structural" && isMobile
+            ? "No separate mobile screenshot \u2014 this responsive site serves the same content at all viewports. See the desktop screenshot above."
+            : scanMode === "jsdom-structural"
+              ? "No screenshot available \u2014 this audit may predate BQL screenshot support."
+              : `No ${isMobile ? "mobile " : ""}screenshot available for this scan \u2014 this audit may predate the screenshot feature, or the capture didn\u2019t complete.`}
         </p>
       </div>
     );

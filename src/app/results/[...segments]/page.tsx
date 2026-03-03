@@ -14,7 +14,8 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { use, useEffect, useRef, useState, useCallback } from "react";
 import { useAuth } from "@clerk/nextjs";
-import { SafeModeModal } from "@/components/SafeModeModal";
+import { ScanModeBanner } from "@/components/ScanModeBanner";
+import { WafBadge } from "@/components/WafBadge";
 import { ScreenshotSection } from "@/components/ScreenshotSection";
 import { AgentPlanButton } from "@/components/AgentPlanButton";
 import { ButtonCard } from "@/components/ButtonCard";
@@ -29,7 +30,7 @@ interface Audit extends ReportData {
   mobileLetterGrade?: string;
   mobileScore?: number;
   mobileRawViolations?: string;
-  mobileScanMode?: "full" | "safe";
+  mobileScanMode?: "full" | "safe" | "jsdom-structural";
   mobileTruncated?: boolean;
   mobileAiSummary?: string;
   mobileTopIssues?: string[];
@@ -449,8 +450,6 @@ export default function ResultsPage({
   const updateVisibility = useMutation(api.audits.updateAuditVisibility);
   const hasRecalculated = useRef(false);
   const hasRedirected = useRef(false);
-  const [safeModeOpen, setSafeModeOpen] = useState(false);
-  const closeSafeMode = useCallback(() => setSafeModeOpen(false), []);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
 
@@ -729,6 +728,11 @@ export default function ResultsPage({
                     Built with {PLATFORM_LABELS[audit.platform]}
                   </span>
                 )}
+                <WafBadge
+                  wafDetected={audit.wafDetected}
+                  wafBypassed={audit.wafBypassed}
+                  scanStrategy={audit.scanStrategy}
+                />
               </div>
             </div>
 
@@ -927,6 +931,7 @@ export default function ResultsPage({
               ? calculateGrade(audit.violations).score
               : (audit.mobileScore ?? calculateGrade(audit.violations).score);
             const vpScanMode = isDesktop ? audit.scanMode : audit.mobileScanMode;
+            const vpScanModeDetail = isDesktop ? audit.scanModeDetail : audit.mobileScanModeDetail;
             const vpTruncated = isDesktop ? audit.truncated : audit.mobileTruncated;
             // When both viewports have zero violations, we save a single shared summary
             // under aiSummary (no separate mobileAiSummary). The mobile tab falls back to it.
@@ -958,32 +963,35 @@ export default function ResultsPage({
                   </div>
                 )}
 
-                {/* Safe Mode Banner */}
-                {vpScanMode === "safe" && (
-                  <>
-                    <div
-                      className="rounded-xl p-4 flex items-start gap-3 border"
-                      style={{ backgroundColor: 'var(--severity-moderate-bg)', borderColor: 'var(--severity-moderate-border)' }}
-                      role="note"
-                    >
-                      <div className="flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: 'var(--severity-moderate-bg)' }}>
-                        <svg className="w-4 h-4" style={{ color: 'var(--severity-moderate)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-                        </svg>
-                      </div>
-                      <div className="flex-1">
-                        <h3 className="text-sm font-semibold mb-1" style={{ color: 'var(--severity-moderate)' }}>Safe Mode</h3>
-                        <p className="text-sm text-theme-secondary">
-                          Because of this site&apos;s complexity, the {isDesktop ? "desktop" : "mobile"} scan ran in Safe Mode. Not all checks were performed.
-                        </p>
-                        <button onClick={() => setSafeModeOpen(true)} className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium cursor-pointer hover:underline transition-colors" style={{ color: 'var(--severity-moderate)' }}>
-                          Learn More
-                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
-                        </button>
-                      </div>
+                {/* Scan Mode Banner (safe mode, structural scan, or full scan confirmation) */}
+                <ScanModeBanner
+                  scanMode={vpScanMode}
+                  scanModeDetail={vpScanModeDetail}
+                  viewport={vpViewport}
+                  totalViolations={vpViolations.total}
+                />
+
+                {/* robots.txt Advisory */}
+                {audit.robotsDisallowed && vpViewport === "desktop" && (
+                  <div
+                    className="rounded-xl p-4 flex items-start gap-3 border border-theme"
+                    style={{ backgroundColor: "var(--color-surface-secondary)" }}
+                    role="note"
+                    aria-label="robots.txt advisory"
+                  >
+                    <div className="flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center bg-theme-tertiary">
+                      <svg className="w-4 h-4 text-theme-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
                     </div>
-                    <SafeModeModal open={safeModeOpen} onClose={closeSafeMode} />
-                  </>
+                    <div>
+                      <p className="text-sm font-medium text-theme-primary">robots.txt Notice</p>
+                      <p className="text-sm text-theme-muted mt-0.5">
+                        This page is marked as disallowed in the site&apos;s robots.txt. The site owner may not intend for automated tools to access it.
+                        This accessibility audit proceeded because it was explicitly requested by a user.
+                      </p>
+                    </div>
+                  </div>
                 )}
 
                 {/* Truncation Banner */}
@@ -1004,7 +1012,7 @@ export default function ResultsPage({
                 )}
 
                 {/* Page Screenshot */}
-                <ScreenshotSection auditId={audit._id} viewport={vpViewport} />
+                <ScreenshotSection auditId={audit._id} viewport={vpViewport} scanMode={vpScanMode} />
 
                 {/* Violations by Severity */}
                 <section>

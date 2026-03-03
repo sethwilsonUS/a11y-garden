@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
 import { calculateGrade, calculateCombinedGrade, GRADING_VERSION } from "@/lib/grading";
 import {
   checkRateLimit,
@@ -6,10 +7,33 @@ import {
   releaseConcurrencySlot,
 } from "@/lib/rate-limit";
 import { validateUrl } from "@/lib/url-validator";
-import { scanUrlDual, ScanBlockedError } from "@/lib/scanner";
+import { ScanBlockedError } from "@/lib/scanner";
+import {
+  createScanStrategy,
+  type ScanStrategyOptions,
+  type StrategyScanResult,
+  type ScanModeInfo,
+} from "@/lib/scan/strategies";
+import {
+  getDomainStrategy,
+  setDomainStrategy,
+} from "@/lib/scan/domain-cache";
+import { scanLog } from "@/lib/scan/monitoring/scan-logger";
+import { checkRobotsTxt } from "@/lib/robots-check";
 
 // Vercel Pro allows up to 60s for serverless functions
 export const maxDuration = 60;
+
+/**
+ * Map ScanModeInfo.mode to the DB/API scanMode field.
+ * "safe-rules" maps to the legacy "safe" value for backward compat.
+ */
+function toScanModeField(
+  info: ScanModeInfo,
+): "full" | "safe" | "jsdom-structural" {
+  if (info.mode === "safe-rules") return "safe";
+  return info.mode;
+}
 
 export async function POST(request: NextRequest) {
   // ---- Env-var guard (fail fast in production) ------------------------------
@@ -30,13 +54,26 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    // ---- Rate limit (per-IP, sliding window) --------------------------------
+    // ---- Auth (Clerk) — resolve early so rate limiter can use userId --------
+    let userId: string | null = null;
+    try {
+      const authResult = await auth();
+      userId = authResult.userId ?? null;
+    } catch {
+      // Clerk middleware may not be configured (local mode, tests, etc.)
+    }
+    const isAuthenticated = !!userId;
+
+    // ---- Rate limit (per-user or per-IP) ------------------------------------
     const ip =
       request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
       request.headers.get("x-real-ip") ??
       "unknown";
 
-    const { allowed, limit, remaining, reset } = await checkRateLimit(ip);
+    const { allowed, limit, remaining, reset } = await checkRateLimit(
+      ip,
+      userId,
+    );
 
     if (!allowed) {
       const retryAfter = reset
@@ -84,72 +121,117 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      // ---- Build browser WS endpoint from env vars --------------------------
-      const browserlessToken = process.env.BROWSERLESS_TOKEN;
-      const browserlessUrl = process.env.BROWSERLESS_URL;
-      const isProduction = process.env.NODE_ENV === "production";
+      // ---- robots.txt advisory check (non-blocking) --------------------------
+      const robotsCheck = await checkRobotsTxt(validation.url);
 
-      let browserWSEndpoint: string | undefined;
+      // ---- Domain strategy cache (skip BaaS for known-WAF domains) -----------
+      const domain = new URL(validation.url).hostname.replace(/^www\./, "");
+      const cachedStrategy = await getDomainStrategy(domain);
 
-      if (browserlessUrl) {
-        // Custom Browserless URL (e.g., local Docker instance)
-        browserWSEndpoint = browserlessToken
-          ? `${browserlessUrl}?token=${browserlessToken}`
-          : browserlessUrl;
-      } else if (isProduction && browserlessToken) {
-        // Production: Connect to Browserless.io cloud
-        browserWSEndpoint = `wss://chrome.browserless.io?token=${browserlessToken}`;
-      }
+      const strategy = cachedStrategy === "bql" && isAuthenticated
+        ? createScanStrategy("bql")
+        : createScanStrategy();
 
-      // ---- Run dual-viewport scan --------------------------------------------
-      const dualResult = await scanUrlDual(validation.url, {
-        browserWSEndpoint,
+      scanLog.scanStarted(
+        validation.url,
+        strategy.name,
+        isAuthenticated,
+        cachedStrategy === "bql",
+      );
+
+      const strategyOpts: Omit<ScanStrategyOptions, "viewport"> = {
         captureScreenshot: true,
+        timeBudgetMs: 55_000,
+        isAuthenticated,
+      };
+
+      // ---- Run scans (desktop + mobile) -------------------------------------
+      const desktopResult = await strategy.scan(validation.url, {
+        ...strategyOpts,
+        viewport: "desktop",
       });
 
-      // ---- Calculate grades -------------------------------------------------
-      const desktopGrade = calculateGrade(dualResult.desktop.violations);
-      const mobileGrade = calculateGrade(dualResult.mobile.violations);
+      const mobileResult = await strategy.scan(validation.url, {
+        ...strategyOpts,
+        viewport: "mobile",
+      });
+
+      // ---- Calculate grades (unchanged) -------------------------------------
+      const desktopGrade = calculateGrade(desktopResult.violations);
+      const mobileGrade = calculateGrade(mobileResult.violations);
       const combined = calculateCombinedGrade(desktopGrade.score, mobileGrade.score);
+
+      const metadata = desktopResult.metadata;
+
+      // ---- Update domain cache + log ------------------------------------------
+      if (metadata) {
+        scanLog.scanCompleted(
+          validation.url,
+          metadata.scanStrategy,
+          metadata.scanDurationMs,
+          metadata.wafDetected,
+          metadata.wafBypassed,
+          metadata.wafType,
+        );
+        if (metadata.wafBypassed) {
+          setDomainStrategy(domain, "bql").catch(() => {});
+        }
+      }
 
       return NextResponse.json({
         gradingVersion: GRADING_VERSION,
-        ...(dualResult.pageTitle && { pageTitle: dualResult.pageTitle }),
-        ...(dualResult.platform && { platform: dualResult.platform }),
+        ...(desktopResult.pageTitle && { pageTitle: desktopResult.pageTitle }),
+        ...(desktopResult.platform && { platform: desktopResult.platform }),
 
-        // Combined weighted grade (60% desktop, 40% mobile)
         letterGrade: combined.grade,
         score: combined.score,
 
+        ...(metadata && {
+          scanStrategy: metadata.scanStrategy,
+          wafDetected: metadata.wafDetected,
+          wafType: metadata.wafType,
+          wafBypassed: metadata.wafBypassed,
+          scanDurationMs: metadata.scanDurationMs,
+        }),
+
+        ...(robotsCheck.disallowed && {
+          robotsDisallowed: true,
+          robotsNotice: robotsCheck.notice,
+        }),
+
         desktop: {
-          violations: dualResult.desktop.violations,
+          violations: desktopResult.violations,
           letterGrade: desktopGrade.grade,
           score: desktopGrade.score,
-          rawViolations: dualResult.desktop.rawViolations,
-          safeMode: dualResult.desktop.safeMode,
-          ...(dualResult.desktop.truncated && { truncated: true }),
-          ...(dualResult.desktop.warning && { warning: dualResult.desktop.warning }),
-          ...(dualResult.desktop.screenshot && {
-            screenshotBase64: dualResult.desktop.screenshot.toString("base64"),
+          rawViolations: desktopResult.rawViolations,
+          safeMode: desktopResult.scanMode.mode !== "full",
+          scanMode: toScanModeField(desktopResult.scanMode),
+          scanModeDetail: desktopResult.scanMode,
+          ...(desktopResult.truncated && { truncated: true }),
+          ...(desktopResult.warning && { warning: desktopResult.warning }),
+          ...(desktopResult.screenshot && {
+            screenshotBase64: desktopResult.screenshot.toString("base64"),
           }),
-          ...(dualResult.desktop.screenshotWarning && {
-            screenshotWarning: dualResult.desktop.screenshotWarning,
+          ...(desktopResult.screenshotWarning && {
+            screenshotWarning: desktopResult.screenshotWarning,
           }),
         },
 
         mobile: {
-          violations: dualResult.mobile.violations,
+          violations: mobileResult.violations,
           letterGrade: mobileGrade.grade,
           score: mobileGrade.score,
-          rawViolations: dualResult.mobile.rawViolations,
-          safeMode: dualResult.mobile.safeMode,
-          ...(dualResult.mobile.truncated && { truncated: true }),
-          ...(dualResult.mobile.warning && { warning: dualResult.mobile.warning }),
-          ...(dualResult.mobile.screenshot && {
-            screenshotBase64: dualResult.mobile.screenshot.toString("base64"),
+          rawViolations: mobileResult.rawViolations,
+          safeMode: mobileResult.scanMode.mode !== "full",
+          scanMode: toScanModeField(mobileResult.scanMode),
+          scanModeDetail: mobileResult.scanMode,
+          ...(mobileResult.truncated && { truncated: true }),
+          ...(mobileResult.warning && { warning: mobileResult.warning }),
+          ...(mobileResult.screenshot && {
+            screenshotBase64: mobileResult.screenshot.toString("base64"),
           }),
-          ...(dualResult.mobile.screenshotWarning && {
-            screenshotWarning: dualResult.mobile.screenshotWarning,
+          ...(mobileResult.screenshotWarning && {
+            screenshotWarning: mobileResult.screenshotWarning,
           }),
         },
       });
@@ -158,13 +240,15 @@ export async function POST(request: NextRequest) {
       await releaseConcurrencySlot();
     }
   } catch (error: unknown) {
-    // Handle WAF / bot-block detection
     if (error instanceof ScanBlockedError) {
+      scanLog.wafDetected("(blocked)", error.pageTitle, "blocked");
       return NextResponse.json(
         {
-          error:
-            "This site's firewall blocked our scanner. The results would not reflect the real page.",
+          error: error.requiresAuth
+            ? "This site's firewall blocked our scanner. Sign in to unlock firewall bypass."
+            : "This site's firewall blocked our scanner. The results would not reflect the real page.",
           blocked: true,
+          requiresAuth: error.requiresAuth,
           pageTitle: error.pageTitle,
           httpStatus: error.httpStatus,
         },
@@ -174,6 +258,7 @@ export async function POST(request: NextRequest) {
 
     const errorMessage =
       error instanceof Error ? error.message : "Unknown error occurred";
+    scanLog.scanFailed("(unknown)", "unknown", errorMessage);
     return NextResponse.json({ error: errorMessage }, { status: 500 });
   }
 }
