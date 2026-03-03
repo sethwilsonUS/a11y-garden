@@ -77,7 +77,7 @@ const ESCALATION_CHAIN: EscalationStep[] = [
 const MAX_RETRIES = 2;
 const INITIAL_BACKOFF_MS = 1_000;
 
-const DEFAULT_BQL_TIMEOUT_MS = 20_000;
+const DEFAULT_BQL_TIMEOUT_MS = 30_000;
 
 async function callBql(
   query: string,
@@ -409,8 +409,9 @@ export class BqlJsdomStrategy implements ScanStrategy {
   }
 
   /**
-   * Two-pass escalation: find the working tier WITHOUT screenshots (fast),
-   * then capture screenshots on the winning tier (best-effort).
+   * Escalate through BQL tiers with screenshots included in the query.
+   * Screenshots add ~2-3s on top of navigation (which is 15-30s for WAF sites),
+   * so including them avoids a costly second navigation through the WAF.
    */
   private async fetchHtml(
     url: string,
@@ -418,11 +419,6 @@ export class BqlJsdomStrategy implements ScanStrategy {
     queryOpts: BqlQueryOptions = {},
   ): Promise<{ content: string; pageTitle: string; screenshotBase64: string | null; mobileScreenshotBase64: string | null }> {
     const deadline = Date.now() + timeBudgetMs;
-
-    // Pass 1: escalation WITHOUT screenshots — just get HTML
-    const escalationOpts: BqlQueryOptions = { ...queryOpts, screenshot: false };
-    let winningStep: EscalationStep | null = null;
-    let winningNav: BqlNavigateResult | null = null;
 
     for (let i = 0; i < ESCALATION_CHAIN.length; i++) {
       const step = ESCALATION_CHAIN[i];
@@ -441,13 +437,13 @@ export class BqlJsdomStrategy implements ScanStrategy {
       );
 
       try {
-        console.log(`[BQL] ${step.label} → ${url} (${Math.round(stepTimeout / 1000)}s budget, no screenshots)`);
+        console.log(`[BQL] ${step.label} → ${url} (${Math.round(stepTimeout / 1000)}s budget)`);
         const nav = await bqlGetHtml(
           url,
           step,
           this.token,
           this.cloudUrl,
-          escalationOpts,
+          queryOpts,
           stepTimeout,
         );
 
@@ -473,9 +469,12 @@ export class BqlJsdomStrategy implements ScanStrategy {
           );
         }
 
-        winningStep = step;
-        winningNav = nav;
-        break;
+        return {
+          content: nav.html,
+          pageTitle: nav.pageTitle,
+          screenshotBase64: nav.screenshotBase64,
+          mobileScreenshotBase64: nav.mobileScreenshotBase64,
+        };
       } catch (err) {
         if (err instanceof ScanBlockedError) throw err;
 
@@ -492,42 +491,6 @@ export class BqlJsdomStrategy implements ScanStrategy {
       }
     }
 
-    if (!winningStep || !winningNav) {
-      throw new Error("BQL escalation chain exhausted without result");
-    }
-
-    // Pass 2: capture desktop screenshot with winning tier (best-effort)
-    if (queryOpts.screenshot) {
-      const remaining = deadline - Date.now();
-      if (remaining > 8_000) {
-        try {
-          console.log(`[BQL] Capturing screenshot with ${winningStep.label} (${Math.round(remaining / 1000)}s remaining)`);
-          const shotNav = await bqlGetHtml(
-            url,
-            winningStep,
-            this.token,
-            this.cloudUrl,
-            { screenshot: true },
-            Math.min(remaining - 3_000, DEFAULT_BQL_TIMEOUT_MS),
-          );
-          winningNav = {
-            ...winningNav,
-            screenshotBase64: shotNav.screenshotBase64,
-            mobileScreenshotBase64: shotNav.mobileScreenshotBase64,
-          };
-        } catch (err) {
-          console.log(`[BQL] Screenshot capture failed (non-fatal): ${err instanceof Error ? err.message : err}`);
-        }
-      } else {
-        console.log(`[BQL] Skipping screenshots — only ${Math.round(remaining / 1000)}s remaining`);
-      }
-    }
-
-    return {
-      content: winningNav.html,
-      pageTitle: winningNav.pageTitle,
-      screenshotBase64: winningNav.screenshotBase64,
-      mobileScreenshotBase64: winningNav.mobileScreenshotBase64,
-    };
+    throw new Error("BQL escalation chain exhausted without result");
   }
 }
