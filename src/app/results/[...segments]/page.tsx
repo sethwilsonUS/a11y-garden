@@ -16,6 +16,8 @@ import { use, useEffect, useRef, useState, useCallback } from "react";
 import { useAuth } from "@clerk/nextjs";
 import { SafeModeModal } from "@/components/SafeModeModal";
 import { ScreenshotSection } from "@/components/ScreenshotSection";
+import { AgentPlanButton } from "@/components/AgentPlanButton";
+import { ButtonCard } from "@/components/ButtonCard";
 import { track } from "@/lib/analytics";
 
 interface Audit extends ReportData {
@@ -872,6 +874,11 @@ export default function ResultsPage({
             </section>
           )}
 
+          {/* Platform-Specific Tip (site-level, not viewport-specific) */}
+          {audit.platformTip && audit.platform && PLATFORM_LABELS[audit.platform] && (
+            <PlatformTipAccordion platform={audit.platform} platformTip={audit.platformTip} />
+          )}
+
           {/* Viewport Tabs (only shown when mobile data exists) */}
           {hasMobileData && (
             <div className="flex gap-1 p-1 rounded-xl bg-theme-secondary border border-theme" role="tablist" aria-label="Viewport results">
@@ -1075,11 +1082,6 @@ export default function ResultsPage({
                   </section>
                 ) : null}
 
-                {/* Platform-Specific Tip (shared, only shown on desktop tab) */}
-                {isDesktop && audit.platformTip && audit.platform && PLATFORM_LABELS[audit.platform] && (
-                  <PlatformTipAccordion platform={audit.platform} platformTip={audit.platformTip} />
-                )}
-
                 {/* Detailed Violations Accordion */}
                 {vpRawViolations && vpViolations.total > 0 && (
                   <DetailedViolationsAccordion rawViolations={vpRawViolations} />
@@ -1095,26 +1097,42 @@ export default function ResultsPage({
           />
 
           {/* Actions */}
-          <section className="flex flex-col sm:flex-row gap-4 pt-4">
-            <Link href="/" className="btn-primary">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-              </svg>
-              Scan Another Site
-            </Link>
-            <CopyReportButton audit={audit} />
-            <button
-              onClick={() => {
-                track("Copy Link");
-                navigator.clipboard.writeText(window.location.href);
-              }}
-              className="btn-secondary cursor-pointer"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-              </svg>
-              Copy Link
-            </button>
+          <section className="flex flex-col sm:flex-row flex-wrap items-start gap-4 pt-4">
+            <ButtonCard>
+              <Link href="/" className="btn-primary">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                </svg>
+                Scan Another Site
+              </Link>
+            </ButtonCard>
+            <ButtonCard>
+              <CopyReportButton audit={audit} />
+            </ButtonCard>
+            <AgentPlanButton
+              auditId={audit._id}
+              platform={audit.platform}
+              status={audit.status}
+              totalViolations={audit.violations.total}
+              mobileTotalViolations={audit.mobileViolations?.total ?? 0}
+              agentPlanFileId={audit.agentPlanFileId as string | undefined}
+              domain={audit.domain}
+              isOwner={isOwner}
+            />
+            <ButtonCard>
+              <button
+                onClick={() => {
+                  track("Copy Link");
+                  navigator.clipboard.writeText(window.location.href);
+                }}
+                className="btn-secondary cursor-pointer"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                </svg>
+                Copy Link
+              </button>
+            </ButtonCard>
           </section>
         </div>
       </div>

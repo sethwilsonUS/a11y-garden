@@ -29,6 +29,11 @@ export const analyzeViolations = action({
         throw new Error("Audit or violations not found");
       }
 
+      // Skip if AI summary was already reused from a previous identical audit
+      if (audit.aiSummary) {
+        return;
+      }
+
       const violations = JSON.parse(audit.rawViolations);
       const mobileViolations = audit.mobileRawViolations
         ? JSON.parse(audit.mobileRawViolations)

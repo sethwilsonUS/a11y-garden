@@ -27,6 +27,7 @@ A friendly accessibility audit tool that provides AI insights and specific, acti
 - 👤 **User Accounts** — Save and manage your audit history with Clerk authentication
 - ⚡ **Real-time Updates** — Live status updates as scans progress
 - 🌗 **Light/Dark Themes** — Modern, accessible interface built with Tailwind CSS v4
+- 🤖 **AI Agent Fix Plans** — Generate downloadable AGENTS.md fix-plan files from audit results, ready to drop into Cursor, Codex, Claude Code, or GitHub Copilot (developer framework sites only)
 - 📋 **Export Reports** — Copy markdown reports including both desktop and mobile results
 - 🛡️ **Rate Limiting & Concurrency** — Per-IP sliding window (5 scans/hour) and global concurrency cap via Upstash Redis
 - 🔒 **SSRF Protection** — URL validation blocks private IP ranges and non-HTTP schemes in production
@@ -346,10 +347,12 @@ The app is designed to degrade gracefully rather than crash:
 │   ├── schema.ts             # Database schema (desktop + mobile fields)
 │   ├── audits.ts             # Audit queries & mutations (incl. mobile)
 │   ├── ai.ts                 # OpenAI integration (parallel desktop/mobile)
+│   ├── agentPlan.ts           # AGENTS.md fix-plan generation action
 │   ├── auth.config.ts        # Clerk ↔ Convex auth config
 │   └── lib/
 │       ├── grading.ts        # Grading algorithm + combined grade
-│       └── grading.test.ts   # Grading tests
+│       ├── groupViolations.ts # Violation grouping & normalization
+│       └── buildAgentPlanPrompt.ts # Prompt builder for agent plans
 ├── src/
 │   ├── app/                  # Next.js App Router
 │   │   ├── page.tsx          # Home page
@@ -364,6 +367,9 @@ The app is designed to degrade gracefully rather than crash:
 │   │       ├── scan/          # Scan API (dual-viewport via scanUrlDual)
 │   │       └── ai-summary/    # AI summary API (local mode + demo)
 │   ├── components/
+│   │   ├── AgentPlanButton.tsx     # Generate/view AGENTS.md fix plans (owner-only)
+│   │   ├── AgentPlanViewer.tsx    # Modal viewer for rendered fix plan markdown
+│   │   ├── ButtonCard.tsx         # Shared wrapper for action buttons
 │   │   ├── ErrorBoundary.tsx      # Global React error boundary
 │   │   ├── ScanForm.tsx           # URL input + dual-viewport orchestration
 │   │   ├── ScreenshotSection.tsx  # Screenshot viewer (desktop or mobile)
@@ -378,6 +384,7 @@ The app is designed to degrade gracefully rather than crash:
 │       ├── mode.ts           # Local vs. web mode detection
 │       ├── ai-summary.ts     # OpenAI integration (CLI + local mode)
 │       ├── grading.ts        # Client-side grading (re-exports Convex)
+│       ├── create-agent-plan-zip.ts # Client-side ZIP bundler for fix plans
 │       ├── rate-limit.ts     # Upstash rate limiting & concurrency
 │       └── url-validator.ts  # SSRF-safe URL validation
 └── middleware.ts             # Clerk auth middleware
@@ -442,7 +449,7 @@ The app is designed to degrade gracefully rather than crash:
 9. **Platform detected** — CMS platforms (WordPress, Shopify, etc.) and frameworks (Next.js, React, Angular, etc.) are identified from HTML markers, with confidence levels (high/medium)
 10. **Audit saved** — Scan results for both viewports are stored in Convex. Desktop and mobile screenshots are uploaded in parallel to file storage.
 11. **Grades calculated** — Per-viewport grades (A-F) plus a combined weighted grade (60% desktop + 40% mobile)
-12. **AI analyzes** — OpenAI generates separate summaries for desktop and mobile violations, plus platform-specific tips (fires in the background)
+12. **AI analyzes** — OpenAI generates separate summaries for desktop and mobile violations, plus platform-specific tips (fires in the background). If violations are identical to the previous audit for the same URL, the AI summary and any existing agent plan are reused without calling OpenAI.
 13. **Results displayed** — A tabbed UI shows Desktop and Mobile results separately. Each tab has its own grade, violations, screenshot, AI summary, and top issues. The combined grade appears in the header.
 
 ---

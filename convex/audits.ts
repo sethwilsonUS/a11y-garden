@@ -238,9 +238,49 @@ export const updateAuditWithResults = mutation({
     const { auditId, ...updates } = args;
     await ctx.db.patch(auditId, {
       ...updates,
-      // Clear any previous error message on successful update
       errorMessage: undefined,
     });
+
+    // Reuse AI content from a previous audit if violations are identical
+    const audit = await ctx.db.get(auditId);
+    if (audit && args.status === "complete") {
+      const previous = await ctx.db
+        .query("audits")
+        .withIndex("by_url", (q) => q.eq("url", audit.url))
+        .filter((q) =>
+          q.and(
+            q.neq(q.field("_id"), auditId),
+            q.eq(q.field("status"), "complete"),
+          ),
+        )
+        .order("desc")
+        .first();
+
+      if (
+        previous &&
+        previous.rawViolations === args.rawViolations &&
+        (previous.mobileRawViolations ?? null) === (args.mobileRawViolations ?? null)
+      ) {
+        const reused: Record<string, unknown> = {};
+
+        if (previous.aiSummary) {
+          reused.aiSummary = previous.aiSummary;
+          reused.topIssues = previous.topIssues;
+          if (previous.platformTip) reused.platformTip = previous.platformTip;
+          if (previous.mobileAiSummary) reused.mobileAiSummary = previous.mobileAiSummary;
+          if (previous.mobileTopIssues) reused.mobileTopIssues = previous.mobileTopIssues;
+        }
+
+        if (previous.agentPlanFileId) {
+          reused.agentPlanFileId = previous.agentPlanFileId;
+          reused.agentPlanGeneratedAt = previous.agentPlanGeneratedAt;
+        }
+
+        if (Object.keys(reused).length > 0) {
+          await ctx.db.patch(auditId, reused);
+        }
+      }
+    }
   },
 });
 
@@ -299,6 +339,28 @@ export const updateAuditAIOnly = mutation({
   },
 });
 
+// Update audit with agent plan file reference (called by agentPlan action)
+export const updateAuditAgentPlan = mutation({
+  args: {
+    auditId: v.id("audits"),
+    agentPlanFileId: v.id("_storage"),
+    agentPlanGeneratedAt: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const audit = await ctx.db.get(args.auditId);
+    if (!audit) throw new Error("Audit not found");
+
+    if (audit.agentPlanFileId) {
+      await ctx.storage.delete(audit.agentPlanFileId);
+    }
+
+    await ctx.db.patch(args.auditId, {
+      agentPlanFileId: args.agentPlanFileId,
+      agentPlanGeneratedAt: args.agentPlanGeneratedAt,
+    });
+  },
+});
+
 // Delete an audit (owner only). Also removes the associated screenshot.
 export const deleteAudit = mutation({
   args: {
@@ -312,6 +374,9 @@ export const deleteAudit = mutation({
     }
     if (audit.mobileScreenshotId) {
       await ctx.storage.delete(audit.mobileScreenshotId);
+    }
+    if (audit.agentPlanFileId) {
+      await ctx.storage.delete(audit.agentPlanFileId);
     }
 
     await ctx.db.delete(args.auditId);
@@ -351,6 +416,16 @@ export const getScreenshotUrl = query({
     const audit = await ctx.db.get(args.auditId);
     if (!audit?.screenshotId) return null;
     return await ctx.storage.getUrl(audit.screenshotId);
+  },
+});
+
+// Get the agent plan file URL for an audit (resolves storageId → serving URL)
+export const getAgentPlanUrl = query({
+  args: { auditId: v.id("audits") },
+  handler: async (ctx, args) => {
+    const audit = await ctx.db.get(args.auditId);
+    if (!audit?.agentPlanFileId) return null;
+    return await ctx.storage.getUrl(audit.agentPlanFileId);
   },
 });
 

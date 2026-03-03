@@ -6,6 +6,11 @@
  * imports so it can be used in both environments.
  */
 
+export const CMS_PLATFORMS = new Set([
+  "wordpress", "squarespace", "shopify", "wix", "webflow",
+  "drupal", "joomla", "ghost", "hubspot", "weebly",
+]);
+
 export const PLATFORM_LABELS: Record<string, string> = {
   // CMS platforms
   wordpress: "WordPress",
