@@ -10,7 +10,7 @@
  */
 
 import { ScanBlockedError } from "@/lib/scanner";
-import { PlaywrightBaaSStrategy } from "./playwright-baas";
+import type { PlaywrightBaaSStrategy } from "./playwright-baas";
 import type { BqlJsdomStrategy } from "./bql-jsdom";
 import { usageTracker } from "../monitoring/usage-tracker";
 import { scanLog } from "../monitoring/scan-logger";
@@ -28,10 +28,18 @@ const RESPONSE_BUFFER_MS = 5_000;
 export class FallbackStrategy implements ScanStrategy {
   name = "fallback";
 
-  private baas = new PlaywrightBaaSStrategy();
+  private baas: PlaywrightBaaSStrategy | null = null;
   private bql: BqlJsdomStrategy | null = null;
   private wafBlockedUrls = new Set<string>();
   private baasDisabled = false;
+
+  private async getBaas(): Promise<PlaywrightBaaSStrategy> {
+    if (!this.baas) {
+      const { PlaywrightBaaSStrategy } = await import("./playwright-baas");
+      this.baas = new PlaywrightBaaSStrategy();
+    }
+    return this.baas;
+  }
 
   private async getBql(): Promise<BqlJsdomStrategy> {
     if (!this.bql) {
@@ -52,9 +60,10 @@ export class FallbackStrategy implements ScanStrategy {
     // Step 1: Try BaaS (fast, full accuracy) — skip if BaaS is broken or URL is WAF-blocked
     if (!skipBaas) {
       try {
+        const baas = await this.getBaas();
         const baasTimeout = Math.min(BAAS_TIMEOUT_MS, opts.timeBudgetMs);
         const result = await Promise.race([
-          this.baas.scan(url, {
+          baas.scan(url, {
             ...opts,
             timeBudgetMs: baasTimeout,
           }),
@@ -132,7 +141,6 @@ export class FallbackStrategy implements ScanStrategy {
     const bql = await this.getBql();
     const bqlResult = await bql.scan(url, {
       ...opts,
-      viewport: "desktop",
       timeBudgetMs: remaining - RESPONSE_BUFFER_MS,
     });
 

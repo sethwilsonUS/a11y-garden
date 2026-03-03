@@ -50,9 +50,12 @@ async function checkBaas(): Promise<HealthStatus["baas"]> {
 
 async function checkBql(): Promise<HealthStatus["bql"]> {
   const token = process.env.BROWSERLESS_TOKEN;
-  const cloudUrl =
+  const rawCloudUrl =
     process.env.BROWSERLESS_CLOUD_URL ||
     "https://production-sfo.browserless.io";
+  const cloudUrl = rawCloudUrl
+    .replace(/^wss:/, "https:")
+    .replace(/^ws:/, "http:");
   if (!token) return { reachable: false, error: "BROWSERLESS_TOKEN not set" };
 
   const endpoint = `${cloudUrl}/chromium/bql?token=${token}`;

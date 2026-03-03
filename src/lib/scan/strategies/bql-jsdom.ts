@@ -302,9 +302,12 @@ export class BqlJsdomStrategy implements ScanStrategy {
       throw new Error("BqlJsdomStrategy requires BROWSERLESS_TOKEN to be set");
     }
     this.token = token;
-    this.cloudUrl =
+    const rawCloudUrl =
       process.env.BROWSERLESS_CLOUD_URL ||
       "https://production-sfo.browserless.io";
+    this.cloudUrl = rawCloudUrl
+      .replace(/^wss:/, "https:")
+      .replace(/^ws:/, "http:");
   }
 
   async scan(
