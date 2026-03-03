@@ -18,8 +18,6 @@
 import type { ScanStrategy } from "./types";
 import { PlaywrightLocalStrategy } from "./playwright-local";
 import { PlaywrightBaaSStrategy } from "./playwright-baas";
-import { BqlJsdomStrategy } from "./bql-jsdom";
-import { FallbackStrategy } from "./fallback";
 
 export type ScanStrategyName = "local" | "baas" | "bql" | "fallback";
 
@@ -30,9 +28,9 @@ function detectDefaultStrategy(): ScanStrategyName {
   return "local";
 }
 
-export function createScanStrategy(
+export async function createScanStrategy(
   overrideName?: ScanStrategyName,
-): ScanStrategy {
+): Promise<ScanStrategy> {
   const name =
     overrideName ??
     (process.env.SCAN_STRATEGY as ScanStrategyName | undefined) ??
@@ -43,10 +41,14 @@ export function createScanStrategy(
       return new PlaywrightLocalStrategy();
     case "baas":
       return new PlaywrightBaaSStrategy();
-    case "bql":
+    case "bql": {
+      const { BqlJsdomStrategy } = await import("./bql-jsdom");
       return new BqlJsdomStrategy();
-    case "fallback":
+    }
+    case "fallback": {
+      const { FallbackStrategy } = await import("./fallback");
       return new FallbackStrategy();
+    }
     default:
       throw new Error(
         `Unknown SCAN_STRATEGY "${name}". Valid values: local, baas, bql, fallback`,

@@ -11,7 +11,7 @@
 
 import { ScanBlockedError } from "@/lib/scanner";
 import { PlaywrightBaaSStrategy } from "./playwright-baas";
-import { BqlJsdomStrategy } from "./bql-jsdom";
+import type { BqlJsdomStrategy } from "./bql-jsdom";
 import { usageTracker } from "../monitoring/usage-tracker";
 import { scanLog } from "../monitoring/scan-logger";
 import type {
@@ -29,7 +29,15 @@ export class FallbackStrategy implements ScanStrategy {
   name = "fallback";
 
   private baas = new PlaywrightBaaSStrategy();
-  private bql = new BqlJsdomStrategy();
+  private bql: BqlJsdomStrategy | null = null;
+
+  private async getBql(): Promise<BqlJsdomStrategy> {
+    if (!this.bql) {
+      const { BqlJsdomStrategy } = await import("./bql-jsdom");
+      this.bql = new BqlJsdomStrategy();
+    }
+    return this.bql;
+  }
 
   async scan(
     url: string,
@@ -117,7 +125,8 @@ export class FallbackStrategy implements ScanStrategy {
       `Escalating to BQL (${Math.round(remaining / 1000)}s remaining)`,
     );
 
-    const bqlResult = await this.bql.scan(url, {
+    const bql = await this.getBql();
+    const bqlResult = await bql.scan(url, {
       ...opts,
       viewport: "desktop",
       timeBudgetMs: remaining - RESPONSE_BUFFER_MS,

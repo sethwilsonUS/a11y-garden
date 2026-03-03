@@ -407,7 +407,7 @@ program
         }
       } else {
         // Use strategy factory (respects SCAN_STRATEGY env var, auto-detects otherwise)
-        const strategy = createScanStrategy();
+        const strategy = await createScanStrategy();
         const strategyLabel =
           strategy.name === "bql-jsdom" ? " (BQL stealth)" :
           strategy.name === "playwright-baas" ? " (via Browserless)" :

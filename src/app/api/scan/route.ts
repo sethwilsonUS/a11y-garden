@@ -129,8 +129,8 @@ export async function POST(request: NextRequest) {
       const cachedStrategy = await getDomainStrategy(domain);
 
       const strategy = cachedStrategy === "bql" && isAuthenticated
-        ? createScanStrategy("bql")
-        : createScanStrategy();
+        ? await createScanStrategy("bql")
+        : await createScanStrategy();
 
       scanLog.scanStarted(
         validation.url,

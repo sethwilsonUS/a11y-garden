@@ -11,7 +11,6 @@
  * - Results are flagged as "structural scan" with skipped-rule reporting
  */
 
-import { JSDOM } from "jsdom";
 import axe from "axe-core";
 import type { ViolationCounts, AxeViolationRaw } from "@/lib/scanner";
 import { truncateViolations } from "@/lib/scanner";
@@ -39,6 +38,8 @@ export async function runAxeOnHtml(
   ruleIds: readonly string[] = STRUCTURAL_RULES,
 ): Promise<AxeJsdomResult> {
   const start = Date.now();
+
+  const { JSDOM } = await import("jsdom");
 
   const dom = new JSDOM(html, {
     url,
