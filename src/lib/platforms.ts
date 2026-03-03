@@ -133,7 +133,6 @@ export function detectPlatformFromHtml(rawHtml: string): string | undefined {
   else if (
     (signal = matched(
       "static.wixstatic.com", "parastorage.com",
-      "wix.com", "wixsite.com",
       "x-wix-", "data-mesh-id",
       "wixui-", "wix-thunderbolt",
     ))
@@ -149,10 +148,8 @@ export function detectPlatformFromHtml(rawHtml: string): string | undefined {
     platform = "webflow";
   else if (
     (signal = matched(
-      "js.hs-scripts.com", "hs-banner.com",
-      ".hubspot.com", "hs-script-loader",
       "hubspot-topic", "hs-menu-wrapper",
-      "data-hs-", "hs_cos_wrapper",
+      "hs_cos_wrapper",
       "powered by hubspot",
     ))
   )
