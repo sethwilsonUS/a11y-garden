@@ -5,7 +5,7 @@
  * Generates a formatted markdown accessibility report from scan results.
  */
 
-import { PLATFORM_LABELS } from "./platforms";
+import { PLATFORM_LABELS, getPlatformConfidence } from "./platforms";
 
 // Axe-core violation structure (for report / display purposes)
 export interface AxeNode {
@@ -45,6 +45,53 @@ export interface ReportData {
   platform?: string;
   /** Platform-specific fix advice from AI */
   platformTip?: string;
+  // Mobile viewport results (optional — missing for desktop-only/legacy audits)
+  mobileViolations?: {
+    critical: number;
+    serious: number;
+    moderate: number;
+    minor: number;
+    total: number;
+  };
+  mobileLetterGrade?: string;
+  mobileScore?: number;
+  mobileScanMode?: "full" | "safe";
+  mobileRawViolations?: string;
+  mobileTruncated?: boolean;
+  mobileAiSummary?: string;
+  mobileTopIssues?: string[];
+}
+
+function renderViolationsByRule(rawViolations: string): string {
+  let md = "";
+  try {
+    const violations: AxeViolation[] = JSON.parse(rawViolations);
+    if (violations.length > 0) {
+      md += `\n---\n\n## Violations by Rule\n\n`;
+      const severityOrder = ["critical", "serious", "moderate", "minor"];
+      const grouped = severityOrder.reduce(
+        (acc, severity) => {
+          acc[severity] = violations.filter((v) => v.impact === severity);
+          return acc;
+        },
+        {} as Record<string, AxeViolation[]>,
+      );
+
+      for (const severity of severityOrder) {
+        const items = grouped[severity];
+        if (items && items.length > 0) {
+          md += `### ${severity.charAt(0).toUpperCase() + severity.slice(1)}\n\n`;
+          for (const violation of items) {
+            md += `- **${violation.help}** (\`${violation.id}\`) — ${violation.nodes.length} element${violation.nodes.length === 1 ? "" : "s"}\n`;
+          }
+          md += "\n";
+        }
+      }
+    }
+  } catch {
+    // Ignore JSON parse errors
+  }
+  return md;
 }
 
 export function generateMarkdownReport(
@@ -101,47 +148,50 @@ ${audit.topIssues.map((issue, i) => `${i + 1}. ${issue}`).join("\n")}
 
   if (audit.platformTip && audit.platform) {
     const label = PLATFORM_LABELS[audit.platform] ?? audit.platform;
+    const isMedium = getPlatformConfidence(audit.platform) === "medium";
+    const heading = isMedium ? `${label} Tip (detected)` : `${label} Tip`;
+    const qualifier = isMedium
+      ? `\n> *We detected ${label} markers on this site but aren't 100% certain. The advice below may not apply if the detection was incorrect.*\n`
+      : "";
     markdown += `
 ---
 
-## ${label} Tip
-
+## ${heading}
+${qualifier}
 ${audit.platformTip}
 `;
   }
 
   if (audit.rawViolations) {
-    try {
-      const violations: AxeViolation[] = JSON.parse(audit.rawViolations);
-      if (violations.length > 0) {
-        markdown += `
----
+    markdown += renderViolationsByRule(audit.rawViolations);
+  }
 
-## Violations by Rule
+  // Mobile viewport section (only included when mobile data exists)
+  if (audit.mobileViolations) {
+    markdown += `\n---\n\n# Mobile Viewport (390×844)\n\n`;
+    markdown += `**Grade:** ${audit.mobileLetterGrade ?? "N/A"} (${audit.mobileScore ?? "N/A"}/100)\n`;
+    if (audit.mobileScanMode === "safe") {
+      markdown += `**Note:** Mobile scan ran in Safe Mode due to site complexity.\n`;
+    }
 
-`;
-        const severityOrder = ["critical", "serious", "moderate", "minor"];
-        const grouped = severityOrder.reduce(
-          (acc, severity) => {
-            acc[severity] = violations.filter((v) => v.impact === severity);
-            return acc;
-          },
-          {} as Record<string, AxeViolation[]>,
-        );
+    markdown += `\n| Severity | Count |\n|----------|-------|\n`;
+    markdown += `| Critical | ${audit.mobileViolations.critical} |\n`;
+    markdown += `| Serious | ${audit.mobileViolations.serious} |\n`;
+    markdown += `| Moderate | ${audit.mobileViolations.moderate} |\n`;
+    markdown += `| Minor | ${audit.mobileViolations.minor} |\n`;
+    markdown += `| **Total** | **${audit.mobileViolations.total}** |\n`;
 
-        for (const severity of severityOrder) {
-          const items = grouped[severity];
-          if (items && items.length > 0) {
-            markdown += `### ${severity.charAt(0).toUpperCase() + severity.slice(1)}\n\n`;
-            for (const violation of items) {
-              markdown += `- **${violation.help}** (\`${violation.id}\`) — ${violation.nodes.length} element${violation.nodes.length === 1 ? "" : "s"}\n`;
-            }
-            markdown += "\n";
-          }
-        }
-      }
-    } catch {
-      // Ignore JSON parse errors
+    if (audit.mobileAiSummary) {
+      markdown += `\n### Mobile AI Summary\n\n${audit.mobileAiSummary}\n`;
+    }
+
+    if (audit.mobileTopIssues && audit.mobileTopIssues.length > 0) {
+      markdown += `\n### Mobile Top Issues\n\n`;
+      markdown += audit.mobileTopIssues.map((issue, i) => `${i + 1}. ${issue}`).join("\n") + "\n";
+    }
+
+    if (audit.mobileRawViolations) {
+      markdown += renderViolationsByRule(audit.mobileRawViolations).replace("## Violations by Rule", "### Mobile Violations by Rule");
     }
   }
 

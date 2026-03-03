@@ -57,6 +57,25 @@ export default defineSchema({
     // Raw data
     rawViolations: v.optional(v.string()),
 
+    // Mobile viewport results (all optional for backward compat with pre-mobile audits)
+    mobileViolations: v.optional(v.object({
+      critical: v.number(),
+      serious: v.number(),
+      moderate: v.number(),
+      minor: v.number(),
+      total: v.number(),
+    })),
+    mobileLetterGrade: v.optional(v.union(
+      v.literal("A"), v.literal("B"), v.literal("C"), v.literal("D"), v.literal("F")
+    )),
+    mobileScore: v.optional(v.number()),
+    mobileRawViolations: v.optional(v.string()),
+    mobileScreenshotId: v.optional(v.id("_storage")),
+    mobileScanMode: v.optional(v.union(v.literal("full"), v.literal("safe"))),
+    mobileTruncated: v.optional(v.boolean()),
+    mobileAiSummary: v.optional(v.string()),
+    mobileTopIssues: v.optional(v.array(v.string())),
+
     // User association
     userId: v.optional(v.string()),
     isPublic: v.boolean(),

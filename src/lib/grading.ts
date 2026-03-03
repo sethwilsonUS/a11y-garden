@@ -5,6 +5,7 @@
  */
 export {
   calculateGrade,
+  calculateCombinedGrade,
   GRADING_VERSION,
   type ViolationCounts,
   type GradeResult,

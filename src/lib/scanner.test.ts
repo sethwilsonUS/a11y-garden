@@ -3,9 +3,13 @@ import {
   truncateViolations,
   ScanBlockedError,
   PLATFORM_LABELS,
+  PLATFORM_CONFIDENCE,
+  getPlatformConfidence,
   type AxeViolationRaw,
   type ScanResult,
   type ScanOptions,
+  type ViewportScanResult,
+  type DualScanResult,
 } from "./scanner";
 
 // ---------------------------------------------------------------------------
@@ -82,13 +86,12 @@ describe("truncateViolations", () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe("large payloads (truncation required)", () => {
-    it("truncates violations that exceed the 500KB cap", () => {
-      // Create a violation with thousands of nodes to exceed 512,000 chars
+    it("truncates violations that exceed the 350KB cap", () => {
       const violations = [makeViolation("image-alt", 5000)];
       const result = truncateViolations(violations);
 
       expect(result.truncated).toBe(true);
-      expect(result.serialized.length).toBeLessThanOrEqual(512_000);
+      expect(result.serialized.length).toBeLessThanOrEqual(358_000);
     });
 
     it("keeps at least one node per violation after truncation", () => {
@@ -294,16 +297,10 @@ describe("PLATFORM_LABELS", () => {
 
   it("maps all expected platform slugs to display names", () => {
     const expected = [
-      "wordpress",
-      "squarespace",
-      "shopify",
-      "wix",
-      "webflow",
-      "drupal",
-      "joomla",
-      "ghost",
-      "hubspot",
-      "weebly",
+      "wordpress", "squarespace", "shopify", "wix", "webflow",
+      "drupal", "joomla", "ghost", "hubspot", "weebly",
+      "nextjs", "nuxt", "gatsby", "angular", "remix", "astro",
+      "react", "vue", "svelte",
     ];
 
     for (const slug of expected) {
@@ -318,6 +315,46 @@ describe("PLATFORM_LABELS", () => {
     expect(PLATFORM_LABELS["squarespace"]).toBe("Squarespace");
     expect(PLATFORM_LABELS["shopify"]).toBe("Shopify");
     expect(PLATFORM_LABELS["hubspot"]).toBe("HubSpot");
+    expect(PLATFORM_LABELS["nextjs"]).toBe("Next.js");
+    expect(PLATFORM_LABELS["angular"]).toBe("Angular");
+    expect(PLATFORM_LABELS["react"]).toBe("React");
+    expect(PLATFORM_LABELS["vue"]).toBe("Vue");
+    expect(PLATFORM_LABELS["svelte"]).toBe("Svelte");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PLATFORM_CONFIDENCE
+// ---------------------------------------------------------------------------
+
+describe("PLATFORM_CONFIDENCE", () => {
+  it("marks base libraries as medium confidence", () => {
+    expect(PLATFORM_CONFIDENCE["react"]).toBe("medium");
+    expect(PLATFORM_CONFIDENCE["vue"]).toBe("medium");
+    expect(PLATFORM_CONFIDENCE["svelte"]).toBe("medium");
+  });
+
+  it("does not list high-confidence platforms (they default to high)", () => {
+    expect(PLATFORM_CONFIDENCE["wordpress"]).toBeUndefined();
+    expect(PLATFORM_CONFIDENCE["nextjs"]).toBeUndefined();
+  });
+});
+
+describe("getPlatformConfidence", () => {
+  it("returns medium for base libraries", () => {
+    expect(getPlatformConfidence("react")).toBe("medium");
+    expect(getPlatformConfidence("vue")).toBe("medium");
+    expect(getPlatformConfidence("svelte")).toBe("medium");
+  });
+
+  it("returns high for CMS and meta-frameworks", () => {
+    expect(getPlatformConfidence("wordpress")).toBe("high");
+    expect(getPlatformConfidence("nextjs")).toBe("high");
+    expect(getPlatformConfidence("angular")).toBe("high");
+  });
+
+  it("returns high for undefined input", () => {
+    expect(getPlatformConfidence(undefined)).toBe("high");
   });
 });
 
@@ -349,5 +386,45 @@ describe("ScanResult platform field", () => {
     };
 
     expect(result.platform).toBe("squarespace");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ViewportScanResult & DualScanResult type contracts
+// ---------------------------------------------------------------------------
+
+describe("ViewportScanResult type", () => {
+  it("can be constructed with required fields", () => {
+    const result: ViewportScanResult = {
+      violations: { critical: 0, serious: 0, moderate: 0, minor: 0, total: 0 },
+      rawViolations: "[]",
+      safeMode: false,
+      truncated: false,
+    };
+
+    expect(result.violations.total).toBe(0);
+    expect(result.screenshot).toBeUndefined();
+  });
+});
+
+describe("DualScanResult type", () => {
+  it("wraps desktop and mobile ViewportScanResults", () => {
+    const vp: ViewportScanResult = {
+      violations: { critical: 0, serious: 0, moderate: 0, minor: 0, total: 0 },
+      rawViolations: "[]",
+      safeMode: false,
+      truncated: false,
+    };
+
+    const dual: DualScanResult = {
+      desktop: vp,
+      mobile: vp,
+      pageTitle: "Test Page",
+    };
+
+    expect(dual.desktop).toBeDefined();
+    expect(dual.mobile).toBeDefined();
+    expect(dual.pageTitle).toBe("Test Page");
+    expect(dual.platform).toBeUndefined();
   });
 });

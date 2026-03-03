@@ -419,6 +419,105 @@ describe("generateAISummary", () => {
 
       expect(result.platformTip).toBeUndefined();
     });
+
+    it("includes confidence hedge for medium-confidence platform", async () => {
+      vi.stubEnv("OPENAI_API_KEY", "sk-test-key");
+
+      mockCreate.mockResolvedValue({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                summary: "test",
+                topIssues: [],
+                platformTip: "Use React aria attributes.",
+              }),
+            },
+          },
+        ],
+      });
+
+      await generateAISummary(sampleViolations, "gpt-4.1-mini", "react");
+
+      const callArgs = mockCreate.mock.calls[0][0];
+      const userMessage = callArgs.messages[1].content as string;
+      expect(userMessage).toContain("appears to use");
+      expect(userMessage).toContain("not 100% certain");
+    });
+
+    it("includes desktop viewport context by default", async () => {
+      vi.stubEnv("OPENAI_API_KEY", "sk-test-key");
+
+      mockCreate.mockResolvedValue({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                summary: "test",
+                topIssues: [],
+              }),
+            },
+          },
+        ],
+      });
+
+      await generateAISummary(sampleViolations, "gpt-4.1-mini");
+
+      const callArgs = mockCreate.mock.calls[0][0];
+      const userMessage = callArgs.messages[1].content as string;
+      expect(userMessage).toContain("desktop viewport");
+      expect(userMessage).toContain("keyboard navigation");
+    });
+
+    it("includes mobile viewport context when viewport is mobile", async () => {
+      vi.stubEnv("OPENAI_API_KEY", "sk-test-key");
+
+      mockCreate.mockResolvedValue({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                summary: "test",
+                topIssues: [],
+              }),
+            },
+          },
+        ],
+      });
+
+      await generateAISummary(sampleViolations, "gpt-4.1-mini", undefined, "mobile");
+
+      const callArgs = mockCreate.mock.calls[0][0];
+      const userMessage = callArgs.messages[1].content as string;
+      expect(userMessage).toContain("mobile viewport");
+      expect(userMessage).toContain("touch target");
+    });
+
+    it("does not hedge for high-confidence platform", async () => {
+      vi.stubEnv("OPENAI_API_KEY", "sk-test-key");
+
+      mockCreate.mockResolvedValue({
+        choices: [
+          {
+            message: {
+              content: JSON.stringify({
+                summary: "test",
+                topIssues: [],
+                platformTip: "Use next/image.",
+              }),
+            },
+          },
+        ],
+      });
+
+      await generateAISummary(sampleViolations, "gpt-4.1-mini", "nextjs");
+
+      const callArgs = mockCreate.mock.calls[0][0];
+      const userMessage = callArgs.messages[1].content as string;
+      expect(userMessage).toContain("Next.js");
+      expect(userMessage).not.toContain("appears to use");
+      expect(userMessage).not.toContain("not 100% certain");
+    });
   });
 
   // ═══════════════════════════════════════════════════════════════════════════

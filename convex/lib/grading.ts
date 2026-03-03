@@ -71,3 +71,27 @@ export function calculateGrade(violations: ViolationCounts): GradeResult {
 
   return { score, grade };
 }
+
+/**
+ * Calculate a combined grade from desktop and mobile scores.
+ * Desktop is weighted at 60%, mobile at 40%.
+ * Falls back to desktop-only when mobileScore is undefined.
+ */
+export function calculateCombinedGrade(
+  desktopScore: number,
+  mobileScore?: number,
+): GradeResult {
+  const score =
+    mobileScore !== undefined
+      ? Math.round(desktopScore * 0.6 + mobileScore * 0.4)
+      : desktopScore;
+
+  let grade: GradeResult["grade"];
+  if (score >= 90) grade = "A";
+  else if (score >= 80) grade = "B";
+  else if (score >= 70) grade = "C";
+  else if (score >= 60) grade = "D";
+  else grade = "F";
+
+  return { score, grade };
+}

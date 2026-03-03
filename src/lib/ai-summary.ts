@@ -6,6 +6,7 @@
  */
 
 import OpenAI from "openai";
+import { PLATFORM_LABELS, getPlatformConfidence } from "./platforms";
 
 export interface AISummaryResult {
   summary: string;
@@ -70,6 +71,7 @@ export async function generateAISummary(
   rawViolations: string,
   model: string = DEFAULT_AI_MODEL,
   platform?: string,
+  viewport: "desktop" | "mobile" = "desktop",
 ): Promise<AISummaryResult> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -96,32 +98,30 @@ export async function generateAISummary(
   const systemPrompt = `You are an accessibility expert translating technical WCAG violations into plain English for web developers and site owners. Focus on user impact and actionable fixes. Be concise and helpful.`;
 
   // Platform-specific context for more actionable advice
-  const platformLabels: Record<string, string> = {
-    wordpress: "WordPress",
-    squarespace: "Squarespace",
-    shopify: "Shopify",
-    wix: "Wix",
-    webflow: "Webflow",
-    drupal: "Drupal",
-    joomla: "Joomla",
-    ghost: "Ghost",
-    hubspot: "HubSpot",
-    weebly: "Weebly",
-  };
-  const platformName = platform ? platformLabels[platform] ?? platform : null;
+  const platformName = platform ? (PLATFORM_LABELS[platform] ?? platform) : null;
+  const isMediumConfidence = platform ? getPlatformConfidence(platform) === "medium" : false;
+
+  const confidenceHedge = isMediumConfidence
+    ? ` (Note: the site appears to use ${platformName} based on HTML markers, but we're not 100% certain — frame your advice accordingly.)`
+    : "";
 
   const platformInstruction = platformName
-    ? `\n3. A "platformTip" — a concise paragraph (2-4 sentences) with actionable, ${platformName}-specific guidance for fixing the violations above. Reference specific ${platformName} features, settings, plugins, or tools the site owner can use. Do NOT repeat the general summary — focus only on platform-specific how-to-fix advice.`
+    ? `\n3. A "platformTip" — a concise paragraph (2-4 sentences) with actionable, ${platformName}-specific guidance for fixing the violations above. Reference specific ${platformName} features, settings, plugins, or tools the site owner can use. Do NOT repeat the general summary — focus only on platform-specific how-to-fix advice.${confidenceHedge}`
     : "";
 
   const platformJsonField = platformName
     ? `\n  "platformTip": "Specific ${platformName} advice..."`
     : "";
 
+  const viewportContext = viewport === "mobile"
+    ? `\nThese violations were found at a mobile viewport (390×844, iPhone). Focus your summary and recommendations on mobile-specific impact — touch target sizes, tap spacing, text readability at small screens, viewport zoom restrictions, and responsive layout issues. Mention when violations would primarily affect mobile users.`
+    : `\nThese violations were found at a desktop viewport (1920×1080). Focus your summary and recommendations on desktop-specific impact — keyboard navigation, screen reader compatibility, focus indicators, and hover interactions.`;
+
   const userPrompt = `
 Analyze these accessibility violations and provide:
 1. A 2-3 sentence summary of the overall accessibility state
 2. The most important issues to address, as a JSON array called "topIssues". Each entry should be a brief, one-line description with user impact. Include between 1 and 5 issues — use your judgment based on the number and diversity of violations. If there is only one distinct problem, return just one issue. If there are many different problems, return up to 5. Never repeat the same issue in different words.${platformInstruction}
+${viewportContext}
 
 Violations:
 ${JSON.stringify(violations.slice(0, 10), null, 2)}

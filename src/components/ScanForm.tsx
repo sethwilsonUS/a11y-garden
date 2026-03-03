@@ -132,17 +132,20 @@ export function ScanForm() {
         isPublic,
       });
 
-      // Warn in console if the screenshot appears blank (dev/debugging aid)
-      if (scanResult.screenshotWarning) {
-        console.warn("[A11y Garden]", scanResult.screenshotWarning);
+      // Warn in console if screenshots appear blank (dev/debugging aid)
+      if (scanResult.desktop?.screenshotWarning) {
+        console.warn("[A11y Garden] Desktop:", scanResult.desktop.screenshotWarning);
+      }
+      if (scanResult.mobile?.screenshotWarning) {
+        console.warn("[A11y Garden] Mobile:", scanResult.mobile.screenshotWarning);
       }
 
-      // Step 3: Upload screenshot to Convex file storage (if available)
-      let screenshotId: Id<"_storage"> | undefined;
-      if (scanResult.screenshotBase64) {
+      // Step 3: Upload screenshots to Convex file storage (desktop + mobile in parallel)
+      const uploadScreenshot = async (base64?: string): Promise<Id<"_storage"> | undefined> => {
+        if (!base64) return undefined;
         try {
           const uploadUrl = await generateUploadUrl();
-          const binaryStr = atob(scanResult.screenshotBase64);
+          const binaryStr = atob(base64);
           const bytes = new Uint8Array(binaryStr.length);
           for (let i = 0; i < binaryStr.length; i++) {
             bytes[i] = binaryStr.charCodeAt(i);
@@ -154,29 +157,45 @@ export function ScanForm() {
           });
           if (uploadResp.ok) {
             const { storageId } = await uploadResp.json();
-            screenshotId = storageId as Id<"_storage">;
+            return storageId as Id<"_storage">;
           }
         } catch {
           // Screenshot upload failure shouldn't block saving results
         }
-      }
+        return undefined;
+      };
+
+      const [screenshotId, mobileScreenshotId] = await Promise.all([
+        uploadScreenshot(scanResult.desktop?.screenshotBase64),
+        uploadScreenshot(scanResult.mobile?.screenshotBase64),
+      ]);
 
       // Step 4: Update Convex with scan results and mark as complete
       setScanStatus("Finalizing...");
       await updateAuditStatus({ auditId, status: "scanning" });
       await updateAuditWithResults({
         auditId,
-        violations: scanResult.violations,
+        violations: scanResult.desktop.violations,
         letterGrade: scanResult.letterGrade,
         score: scanResult.score,
         gradingVersion: scanResult.gradingVersion,
-        rawViolations: scanResult.rawViolations,
+        rawViolations: scanResult.desktop.rawViolations,
         status: "complete",
-        scanMode: scanResult.safeMode ? "safe" : "full",
+        scanMode: scanResult.desktop.safeMode ? "safe" : "full",
         ...(scanResult.pageTitle ? { pageTitle: scanResult.pageTitle } : {}),
-        ...(scanResult.truncated ? { truncated: true } : {}),
+        ...(scanResult.desktop.truncated ? { truncated: true } : {}),
         ...(screenshotId ? { screenshotId } : {}),
         ...(scanResult.platform ? { platform: scanResult.platform } : {}),
+        // Mobile viewport fields
+        ...(scanResult.mobile ? {
+          mobileViolations: scanResult.mobile.violations,
+          mobileLetterGrade: scanResult.mobile.letterGrade,
+          mobileScore: scanResult.mobile.score,
+          mobileRawViolations: scanResult.mobile.rawViolations,
+          mobileScanMode: scanResult.mobile.safeMode ? ("safe" as const) : ("full" as const),
+          ...(scanResult.mobile.truncated ? { mobileTruncated: true } : {}),
+          ...(mobileScreenshotId ? { mobileScreenshotId } : {}),
+        } : {}),
       });
 
       // Step 5: Fire off AI analysis in background (don't await)
