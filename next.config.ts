@@ -6,7 +6,7 @@ const nextConfig: NextConfig = {
   // `typeof module` with a literal "object", which breaks the guard around
   // `module.exports` and causes a ReferenceError when the source string is
   // evaluated inside a browser page via Playwright.
-  serverExternalPackages: ["axe-core"],
+  serverExternalPackages: ["axe-core", "jsdom"],
 };
 
 export default nextConfig;
