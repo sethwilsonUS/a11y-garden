@@ -189,7 +189,7 @@ export function ScanForm() {
           : {}),
         ...(scanResult.scanStrategy ? { scanStrategy: scanResult.scanStrategy } : {}),
         ...(scanResult.wafDetected != null ? { wafDetected: scanResult.wafDetected } : {}),
-        ...(scanResult.wafType !== undefined ? { wafType: scanResult.wafType } : {}),
+        ...(scanResult.wafType ? { wafType: scanResult.wafType } : {}),
         ...(scanResult.wafBypassed != null ? { wafBypassed: scanResult.wafBypassed } : {}),
         ...(scanResult.scanDurationMs != null ? { scanDurationMs: scanResult.scanDurationMs } : {}),
         ...(scanResult.pageTitle ? { pageTitle: scanResult.pageTitle } : {}),
