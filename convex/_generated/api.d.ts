@@ -8,10 +8,13 @@
  * @module
  */
 
+import type * as agentPlan from "../agentPlan.js";
 import type * as ai from "../ai.js";
 import type * as audits from "../audits.js";
+import type * as lib_buildAgentPlanPrompt from "../lib/buildAgentPlanPrompt.js";
 import type * as lib_dedup from "../lib/dedup.js";
 import type * as lib_grading from "../lib/grading.js";
+import type * as lib_groupViolations from "../lib/groupViolations.js";
 import type * as scanner from "../scanner.js";
 
 import type {
@@ -21,10 +24,13 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  agentPlan: typeof agentPlan;
   ai: typeof ai;
   audits: typeof audits;
+  "lib/buildAgentPlanPrompt": typeof lib_buildAgentPlanPrompt;
   "lib/dedup": typeof lib_dedup;
   "lib/grading": typeof lib_grading;
+  "lib/groupViolations": typeof lib_groupViolations;
   scanner: typeof scanner;
 }>;
 

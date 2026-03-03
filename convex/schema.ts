@@ -83,6 +83,10 @@ export default defineSchema({
     // Screenshot of the scanned page (stored via Convex file storage)
     screenshotId: v.optional(v.id("_storage")),
 
+    // Agent plan (AGENTS.md) stored in Convex file storage
+    agentPlanFileId: v.optional(v.id("_storage")),
+    agentPlanGeneratedAt: v.optional(v.number()),
+
     // Error handling
     errorMessage: v.optional(v.string()),
   })

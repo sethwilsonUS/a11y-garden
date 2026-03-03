@@ -67,6 +67,7 @@ function AuthControls() {
           Dashboard
         </Link>
         <UserButton
+          afterSignOutUrl="/"
           appearance={{
             elements: {
               avatarBox: "w-9 h-9",

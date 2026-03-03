@@ -27,6 +27,7 @@ A friendly accessibility audit tool that provides AI insights and specific, acti
 - 👤 **User Accounts** — Save and manage your audit history with Clerk authentication
 - ⚡ **Real-time Updates** — Live status updates as scans progress
 - 🌗 **Light/Dark Themes** — Modern, accessible interface built with Tailwind CSS v4
+- 🤖 **AI Agent Fix Plans** — Generate downloadable AGENTS.md fix-plan files from audit results, ready to drop into Cursor, Codex, Claude Code, or GitHub Copilot (developer framework sites only)
 - 📋 **Export Reports** — Copy markdown reports including both desktop and mobile results
 - 🛡️ **Rate Limiting & Concurrency** — Per-IP sliding window (5 scans/hour) and global concurrency cap via Upstash Redis
 - 🔒 **SSRF Protection** — URL validation blocks private IP ranges and non-HTTP schemes in production
@@ -346,10 +347,12 @@ The app is designed to degrade gracefully rather than crash:
 │   ├── schema.ts             # Database schema (desktop + mobile fields)
 │   ├── audits.ts             # Audit queries & mutations (incl. mobile)
 │   ├── ai.ts                 # OpenAI integration (parallel desktop/mobile)
+│   ├── agentPlan.ts           # AGENTS.md fix-plan generation action
 │   ├── auth.config.ts        # Clerk ↔ Convex auth config
 │   └── lib/
 │       ├── grading.ts        # Grading algorithm + combined grade
-│       └── grading.test.ts   # Grading tests
+│       ├── groupViolations.ts # Violation grouping & normalization
+│       └── buildAgentPlanPrompt.ts # Prompt builder for agent plans
 ├── src/
 │   ├── app/                  # Next.js App Router
 │   │   ├── page.tsx          # Home page
@@ -364,6 +367,7 @@ The app is designed to degrade gracefully rather than crash:
 │   │       ├── scan/          # Scan API (dual-viewport via scanUrlDual)
 │   │       └── ai-summary/    # AI summary API (local mode + demo)
 │   ├── components/
+│   │   ├── AgentPlanButton.tsx     # Generate/download AGENTS.md fix plans
 │   │   ├── ErrorBoundary.tsx      # Global React error boundary
 │   │   ├── ScanForm.tsx           # URL input + dual-viewport orchestration
 │   │   ├── ScreenshotSection.tsx  # Screenshot viewer (desktop or mobile)

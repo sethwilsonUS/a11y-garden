@@ -299,6 +299,28 @@ export const updateAuditAIOnly = mutation({
   },
 });
 
+// Update audit with agent plan file reference (called by agentPlan action)
+export const updateAuditAgentPlan = mutation({
+  args: {
+    auditId: v.id("audits"),
+    agentPlanFileId: v.id("_storage"),
+    agentPlanGeneratedAt: v.number(),
+  },
+  handler: async (ctx, args) => {
+    const audit = await ctx.db.get(args.auditId);
+    if (!audit) throw new Error("Audit not found");
+
+    if (audit.agentPlanFileId) {
+      await ctx.storage.delete(audit.agentPlanFileId);
+    }
+
+    await ctx.db.patch(args.auditId, {
+      agentPlanFileId: args.agentPlanFileId,
+      agentPlanGeneratedAt: args.agentPlanGeneratedAt,
+    });
+  },
+});
+
 // Delete an audit (owner only). Also removes the associated screenshot.
 export const deleteAudit = mutation({
   args: {
@@ -312,6 +334,9 @@ export const deleteAudit = mutation({
     }
     if (audit.mobileScreenshotId) {
       await ctx.storage.delete(audit.mobileScreenshotId);
+    }
+    if (audit.agentPlanFileId) {
+      await ctx.storage.delete(audit.agentPlanFileId);
     }
 
     await ctx.db.delete(args.auditId);
@@ -351,6 +376,16 @@ export const getScreenshotUrl = query({
     const audit = await ctx.db.get(args.auditId);
     if (!audit?.screenshotId) return null;
     return await ctx.storage.getUrl(audit.screenshotId);
+  },
+});
+
+// Get the agent plan file URL for an audit (resolves storageId → serving URL)
+export const getAgentPlanUrl = query({
+  args: { auditId: v.id("audits") },
+  handler: async (ctx, args) => {
+    const audit = await ctx.db.get(args.auditId);
+    if (!audit?.agentPlanFileId) return null;
+    return await ctx.storage.getUrl(audit.agentPlanFileId);
   },
 });
 
