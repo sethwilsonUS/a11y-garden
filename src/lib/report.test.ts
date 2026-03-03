@@ -519,4 +519,109 @@ describe("generateMarkdownReport", () => {
       expect(rulesIdx).toBeLessThan(footerIdx);
     });
   });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // MOBILE VIEWPORT SECTION
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe("mobile viewport section", () => {
+    it("includes mobile section when mobileViolations is present", () => {
+      const md = generateMarkdownReport(
+        makeReport({
+          mobileViolations: { critical: 1, serious: 0, moderate: 2, minor: 0, total: 3 },
+          mobileLetterGrade: "C",
+          mobileScore: 72,
+        }),
+      );
+
+      expect(md).toContain("Mobile Viewport");
+      expect(md).toContain("C (72/100)");
+    });
+
+    it("omits mobile section when mobileViolations is undefined", () => {
+      const md = generateMarkdownReport(makeReport());
+
+      expect(md).not.toContain("Mobile Viewport");
+    });
+
+    it("includes mobile violations table", () => {
+      const md = generateMarkdownReport(
+        makeReport({
+          mobileViolations: { critical: 0, serious: 2, moderate: 1, minor: 3, total: 6 },
+          mobileLetterGrade: "D",
+          mobileScore: 65,
+        }),
+      );
+
+      expect(md).toContain("| Serious | 2 |");
+      expect(md).toContain("| **Total** | **6** |");
+    });
+
+    it("includes mobile AI summary when present", () => {
+      const md = generateMarkdownReport(
+        makeReport({
+          mobileViolations: { critical: 0, serious: 1, moderate: 0, minor: 0, total: 1 },
+          mobileAiSummary: "Mobile has color contrast issues.",
+        }),
+      );
+
+      expect(md).toContain("Mobile AI Summary");
+      expect(md).toContain("Mobile has color contrast issues.");
+    });
+
+    it("includes mobile top issues when present", () => {
+      const md = generateMarkdownReport(
+        makeReport({
+          mobileViolations: { critical: 0, serious: 1, moderate: 0, minor: 0, total: 1 },
+          mobileTopIssues: ["Touch targets too small", "Color contrast fails"],
+        }),
+      );
+
+      expect(md).toContain("Mobile Top Issues");
+      expect(md).toContain("1. Touch targets too small");
+      expect(md).toContain("2. Color contrast fails");
+    });
+
+    it("shows mobile safe mode note", () => {
+      const md = generateMarkdownReport(
+        makeReport({
+          mobileViolations: { critical: 0, serious: 0, moderate: 0, minor: 0, total: 0 },
+          mobileScanMode: "safe",
+        }),
+      );
+
+      expect(md).toContain("Mobile scan ran in Safe Mode");
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PLATFORM CONFIDENCE QUALIFIER
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe("platform confidence qualifier", () => {
+    it("includes confidence qualifier for medium-confidence platforms", () => {
+      const md = generateMarkdownReport(
+        makeReport({
+          platform: "react",
+          platformTip: "Use React's aria attributes.",
+        }),
+      );
+
+      expect(md).toContain("React Tip (detected)");
+      expect(md).toContain("We detected React markers");
+    });
+
+    it("does not include qualifier for high-confidence platforms", () => {
+      const md = generateMarkdownReport(
+        makeReport({
+          platform: "nextjs",
+          platformTip: "Use next/image for alt text.",
+        }),
+      );
+
+      expect(md).toContain("Next.js Tip");
+      expect(md).not.toContain("(detected)");
+      expect(md).not.toContain("We detected");
+    });
+  });
 });

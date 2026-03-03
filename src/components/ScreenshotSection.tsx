@@ -8,6 +8,7 @@ import { track } from "@/lib/analytics";
 
 interface ScreenshotSectionProps {
   auditId: Id<"audits">;
+  viewport?: "desktop" | "mobile";
 }
 
 /**
@@ -19,9 +20,13 @@ interface ScreenshotSectionProps {
  *  - No screenshot (null)      → subtle "not available" note
  *  - Screenshot available (URL) → collapsible image viewer
  */
-export function ScreenshotSection({ auditId }: ScreenshotSectionProps) {
+export function ScreenshotSection({ auditId, viewport = "desktop" }: ScreenshotSectionProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const screenshotUrl = useQuery(api.audits.getScreenshotUrl, { auditId });
+  const desktopUrl = useQuery(api.audits.getScreenshotUrl, { auditId });
+  const mobileUrl = useQuery(api.audits.getMobileScreenshotUrl, { auditId });
+
+  const screenshotUrl = viewport === "mobile" ? mobileUrl : desktopUrl;
+  const isMobile = viewport === "mobile";
 
   // Still loading — don't render anything to avoid layout shift
   if (screenshotUrl === undefined) return null;
@@ -51,22 +56,25 @@ export function ScreenshotSection({ auditId }: ScreenshotSectionProps) {
           />
         </svg>
         <p>
-          No screenshot available for this scan — this audit may predate the screenshot feature, or the capture didn&apos;t complete.
+          No {isMobile ? "mobile " : ""}screenshot available for this scan — this audit may predate the screenshot feature, or the capture didn&apos;t complete.
         </p>
       </div>
     );
   }
 
+  const panelId = `screenshot-panel-${viewport}`;
+  const label = isMobile ? "Mobile Screenshot" : "Page Screenshot";
+
   return (
     <section className="garden-bed overflow-hidden">
       <button
         onClick={() => {
-          if (!isOpen) track("Screenshot Expanded");
+          if (!isOpen) track("Screenshot Expanded", { viewport });
           setIsOpen(!isOpen);
         }}
         className="w-full px-6 py-4 flex items-center justify-between bg-theme-secondary hover:bg-theme-tertiary transition-colors cursor-pointer rounded-t-2xl"
         aria-expanded={isOpen}
-        aria-controls="screenshot-panel"
+        aria-controls={panelId}
       >
         <div className="flex items-center gap-3">
           <svg
@@ -90,7 +98,7 @@ export function ScreenshotSection({ auditId }: ScreenshotSectionProps) {
             />
           </svg>
           <span className="font-display font-semibold text-theme-primary">
-            Page Screenshot
+            {label}
           </span>
           <span className="text-sm text-theme-muted">
             Verify scanned page
@@ -114,20 +122,20 @@ export function ScreenshotSection({ auditId }: ScreenshotSectionProps) {
 
       {isOpen && (
         <div
-          id="screenshot-panel"
+          id={panelId}
           className="p-6 bg-theme-primary border-t border-theme"
         >
-          <div className="rounded-lg overflow-hidden border border-theme shadow-sm">
+          <div className={`rounded-lg overflow-hidden border border-theme shadow-sm ${isMobile ? "max-w-xs mx-auto" : ""}`}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={screenshotUrl}
-              alt="Screenshot of the scanned page at the time of the audit"
+              alt={`Screenshot of the scanned page at ${viewport} viewport`}
               className="w-full h-auto"
               loading="lazy"
             />
           </div>
           <p className="text-xs text-theme-muted mt-3 text-center">
-            Screenshot captured at the time of scan — confirms the scanner reached the real page.
+            {isMobile ? "Mobile (390×844)" : "Desktop (1920×1080)"} screenshot captured at the time of scan.
           </p>
         </div>
       )}

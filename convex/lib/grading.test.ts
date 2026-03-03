@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   calculateGrade,
+  calculateCombinedGrade,
   GRADING_VERSION,
   type ViolationCounts,
 } from "./grading";
@@ -584,5 +585,58 @@ describe("calculateGrade", () => {
     it("current version is 3", () => {
       expect(GRADING_VERSION).toBe(3);
     });
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// calculateCombinedGrade
+// ═══════════════════════════════════════════════════════════════════════════
+
+describe("calculateCombinedGrade", () => {
+  it("returns weighted average (60% desktop + 40% mobile)", () => {
+    const result = calculateCombinedGrade(100, 50);
+    // 100*0.6 + 50*0.4 = 60 + 20 = 80
+    expect(result.score).toBe(80);
+    expect(result.grade).toBe("B");
+  });
+
+  it("falls back to desktop-only when mobile is undefined", () => {
+    const result = calculateCombinedGrade(85);
+    expect(result.score).toBe(85);
+    expect(result.grade).toBe("B");
+  });
+
+  it("derives correct letter grade from combined score", () => {
+    expect(calculateCombinedGrade(95, 95).grade).toBe("A");
+    expect(calculateCombinedGrade(85, 85).grade).toBe("B");
+    expect(calculateCombinedGrade(75, 75).grade).toBe("C");
+    expect(calculateCombinedGrade(65, 65).grade).toBe("D");
+    expect(calculateCombinedGrade(50, 50).grade).toBe("F");
+  });
+
+  it("handles both perfect scores", () => {
+    const result = calculateCombinedGrade(100, 100);
+    expect(result.score).toBe(100);
+    expect(result.grade).toBe("A");
+  });
+
+  it("handles both failing scores", () => {
+    const result = calculateCombinedGrade(0, 0);
+    expect(result.score).toBe(0);
+    expect(result.grade).toBe("F");
+  });
+
+  it("handles desktop A + mobile F", () => {
+    const result = calculateCombinedGrade(95, 40);
+    // 95*0.6 + 40*0.4 = 57 + 16 = 73
+    expect(result.score).toBe(73);
+    expect(result.grade).toBe("C");
+  });
+
+  it("rounds the combined score to nearest integer", () => {
+    const result = calculateCombinedGrade(91, 72);
+    // 91*0.6 + 72*0.4 = 54.6 + 28.8 = 83.4 → 83
+    expect(result.score).toBe(83);
+    expect(result.grade).toBe("B");
   });
 });

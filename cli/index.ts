@@ -41,9 +41,9 @@ try {
 import { Command } from "commander";
 import chalk from "chalk";
 import ora from "ora";
-import { scanUrl, ScanBlockedError } from "@/lib/scanner";
+import { scanUrl, scanUrlDual, ScanBlockedError } from "@/lib/scanner";
 import { PLATFORM_LABELS } from "@/lib/platforms";
-import { calculateGrade } from "@/lib/grading";
+import { calculateGrade, calculateCombinedGrade } from "@/lib/grading";
 import {
   generateMarkdownReport,
   type ReportData,
@@ -281,10 +281,11 @@ program
   .option("--json", "Output raw JSON")
   .option("--screenshot [path]", "Save a screenshot of the scanned page (default: screenshot.jpg)")
   .option("--local", "Force local Playwright even if BROWSERLESS_URL is set")
+  .option("--desktop-only", "Skip mobile viewport scan (desktop only)")
   .action(
     async (
       rawUrl: string,
-      options: { ai: boolean; markdown: boolean; json: boolean; screenshot?: boolean | string; local?: boolean },
+      options: { ai: boolean; markdown: boolean; json: boolean; screenshot?: boolean | string; local?: boolean; desktopOnly?: boolean },
     ) => {
       // ---- Normalize URL ----------------------------------------------------
       let url = rawUrl.trim();
@@ -332,11 +333,21 @@ program
       const wantsScreenshot = options.screenshot !== undefined && options.screenshot !== false;
 
       let scanResult;
+      let dualResult;
+      const desktopOnly = !!options.desktopOnly;
+
       try {
-        scanResult = await scanUrl(url, {
-          captureScreenshot: wantsScreenshot,
-          browserWSEndpoint,
-        });
+        if (desktopOnly) {
+          scanResult = await scanUrl(url, {
+            captureScreenshot: wantsScreenshot,
+            browserWSEndpoint,
+          });
+        } else {
+          dualResult = await scanUrlDual(url, {
+            captureScreenshot: wantsScreenshot,
+            browserWSEndpoint,
+          });
+        }
       } catch (error) {
         if (error instanceof ScanBlockedError) {
           spinner.fail(
@@ -358,46 +369,67 @@ program
         process.exit(1);
       }
 
-      spinner.succeed(
-        `Page loaded: ${chalk.white.bold(`"${scanResult.pageTitle || "Untitled"}"`)}` +
-          (scanResult.safeMode ? chalk.yellow(" (safe mode)") : ""),
-      );
+      // Normalize to a single-viewport result for desktop-only mode
+      if (desktopOnly && scanResult) {
+        spinner.succeed(
+          `Page loaded: ${chalk.white.bold(`"${scanResult.pageTitle || "Untitled"}"`)}` +
+            (scanResult.safeMode ? chalk.yellow(" (safe mode)") : ""),
+        );
+      } else if (dualResult) {
+        spinner.succeed(
+          `Page loaded: ${chalk.white.bold(`"${dualResult.pageTitle || "Untitled"}"`)}` +
+            (dualResult.desktop.safeMode ? chalk.yellow(" (desktop: safe mode)") : "") +
+            (dualResult.mobile.safeMode ? chalk.yellow(" (mobile: safe mode)") : ""),
+        );
+      }
 
       // ---- Screenshot (optional) ---------------------------------------------
-      if (wantsScreenshot && scanResult.screenshot) {
+      const desktopScreenshot = desktopOnly ? scanResult?.screenshot : dualResult?.desktop.screenshot;
+      if (wantsScreenshot && desktopScreenshot) {
         const outPath =
           typeof options.screenshot === "string"
             ? options.screenshot
             : "screenshot.jpg";
-        writeFileSync(outPath, scanResult.screenshot);
-        const sizeKB = Math.round(scanResult.screenshot.length / 1024);
+        writeFileSync(outPath, desktopScreenshot);
+        const sizeKB = Math.round(desktopScreenshot.length / 1024);
         if (isTTY) {
           console.error(
-            chalk.green(`  ✓ Screenshot saved to ${chalk.white.bold(outPath)} (${sizeKB} KB)\n`),
+            chalk.green(`  ✓ Desktop screenshot saved to ${chalk.white.bold(outPath)} (${sizeKB} KB)\n`),
           );
         }
-      } else if (wantsScreenshot && !scanResult.screenshot) {
-        if (isTTY) {
-          console.error(chalk.yellow("  ⚠ Screenshot capture failed\n"));
-        }
       }
-
-      // Warn if screenshot appears blank (page may not have rendered)
-      if (wantsScreenshot && scanResult.screenshotWarning && isTTY) {
-        console.error(
-          chalk.yellow(`  ⚠ ${scanResult.screenshotWarning}\n`),
-        );
+      if (wantsScreenshot && !desktopOnly && dualResult?.mobile.screenshot) {
+        const mobilePath = "screenshot-mobile.jpg";
+        writeFileSync(mobilePath, dualResult.mobile.screenshot);
+        const sizeKB = Math.round(dualResult.mobile.screenshot.length / 1024);
+        if (isTTY) {
+          console.error(
+            chalk.green(`  ✓ Mobile screenshot saved to ${chalk.white.bold(mobilePath)} (${sizeKB} KB)\n`),
+          );
+        }
       }
 
       // ---- Grade ------------------------------------------------------------
-      const { score, grade } = calculateGrade(scanResult.violations);
+      const desktopViolations = desktopOnly ? scanResult!.violations : dualResult!.desktop.violations;
+      const desktopGradeResult = calculateGrade(desktopViolations);
+      
+      let mobileGradeResult;
+      let combinedGradeResult;
+      if (!desktopOnly && dualResult) {
+        mobileGradeResult = calculateGrade(dualResult.mobile.violations);
+        combinedGradeResult = calculateCombinedGrade(desktopGradeResult.score, mobileGradeResult.score);
+      }
+      
+      const primaryScore = combinedGradeResult?.score ?? desktopGradeResult.score;
+      const primaryGrade = combinedGradeResult?.grade ?? desktopGradeResult.grade;
 
       // ---- AI Summary (optional) --------------------------------------------
-      // Runs automatically when OPENAI_API_KEY is set.
-      // --no-ai explicitly skips it; missing key silently degrades.
       let aiSummary: string | undefined;
       let topIssues: string[] | undefined;
       let platformTip: string | undefined;
+
+      const detectedPlatform = desktopOnly ? scanResult?.platform : dualResult?.platform;
+      const desktopRawViolations = desktopOnly ? scanResult!.rawViolations : dualResult!.desktop.rawViolations;
 
       const hasOpenAIKey = !!process.env.OPENAI_API_KEY;
       const wantsAI = options.ai && hasOpenAIKey;
@@ -408,7 +440,7 @@ program
         );
       }
 
-      if (wantsAI && scanResult.violations.total > 0) {
+      if (wantsAI && desktopViolations.total > 0) {
         const aiSpinner = ora({
           text: "Generating AI summary...",
           stream: process.stderr,
@@ -416,9 +448,9 @@ program
 
         try {
           const aiResult = await generateAISummary(
-            scanResult.rawViolations,
+            desktopRawViolations,
             DEFAULT_AI_MODEL,
-            scanResult.platform,
+            detectedPlatform,
           );
           aiSummary = aiResult.summary;
           topIssues = aiResult.topIssues;
@@ -429,50 +461,97 @@ program
             error instanceof Error ? error.message : "unknown error";
           aiSpinner.warn(`AI summary skipped: ${msg}`);
         }
-      } else if (wantsAI && scanResult.violations.total === 0) {
+      } else if (wantsAI && desktopViolations.total === 0) {
         aiSummary =
           "Excellent! This page passed all automated accessibility checks. While automated testing can't catch every accessibility issue, this is a great foundation.";
         topIssues = [];
       }
 
       // ---- Build report data ------------------------------------------------
+      const desktopSafeMode = desktopOnly ? scanResult!.safeMode : dualResult!.desktop.safeMode;
+      
       const reportData: ReportData = {
         url,
-        pageTitle: scanResult.pageTitle,
-        letterGrade: grade,
-        score,
+        pageTitle: desktopOnly ? scanResult!.pageTitle : dualResult!.pageTitle,
+        letterGrade: primaryGrade,
+        score: primaryScore,
         scannedAt: Date.now(),
-        violations: scanResult.violations,
-        scanMode: scanResult.safeMode ? "safe" : "full",
-        rawViolations: scanResult.rawViolations,
+        violations: desktopViolations,
+        scanMode: desktopSafeMode ? "safe" : "full",
+        rawViolations: desktopRawViolations,
         ...(aiSummary !== undefined && { aiSummary }),
         ...(topIssues !== undefined && { topIssues }),
-        ...(scanResult.platform && { platform: scanResult.platform }),
+        ...(detectedPlatform && { platform: detectedPlatform }),
         ...(platformTip && { platformTip }),
+        // Mobile fields for report generator
+        ...(!desktopOnly && dualResult ? {
+          mobileViolations: dualResult.mobile.violations,
+          mobileLetterGrade: mobileGradeResult!.grade,
+          mobileScore: mobileGradeResult!.score,
+          mobileScanMode: (dualResult.mobile.safeMode ? "safe" : "full") as "full" | "safe",
+          mobileRawViolations: dualResult.mobile.rawViolations,
+          ...(dualResult.mobile.truncated && { mobileTruncated: true }),
+        } : {}),
       };
 
       // ---- Output -----------------------------------------------------------
       if (options.json) {
-        const output = {
+        const output: Record<string, unknown> = {
           url,
-          pageTitle: scanResult.pageTitle,
-          letterGrade: grade,
-          score,
-          violations: scanResult.violations,
-          safeMode: scanResult.safeMode,
-          truncated: scanResult.truncated,
-          ...(scanResult.platform && { platform: scanResult.platform }),
+          pageTitle: desktopOnly ? scanResult!.pageTitle : dualResult!.pageTitle,
+          letterGrade: primaryGrade,
+          score: primaryScore,
+          ...(detectedPlatform && { platform: detectedPlatform }),
           ...(aiSummary !== undefined && { aiSummary }),
           ...(topIssues !== undefined && { topIssues }),
-          rawViolations: JSON.parse(scanResult.rawViolations),
-          ...(scanResult.warning && { warning: scanResult.warning }),
+          desktop: {
+            letterGrade: desktopGradeResult.grade,
+            score: desktopGradeResult.score,
+            violations: desktopViolations,
+            safeMode: desktopSafeMode,
+            truncated: desktopOnly ? scanResult!.truncated : dualResult!.desktop.truncated,
+            rawViolations: JSON.parse(desktopRawViolations),
+          },
         };
+        if (!desktopOnly && dualResult && mobileGradeResult) {
+          output.mobile = {
+            letterGrade: mobileGradeResult.grade,
+            score: mobileGradeResult.score,
+            violations: dualResult.mobile.violations,
+            safeMode: dualResult.mobile.safeMode,
+            truncated: dualResult.mobile.truncated,
+            rawViolations: JSON.parse(dualResult.mobile.rawViolations),
+          };
+        }
         console.log(JSON.stringify(output, null, 2));
       } else if (options.markdown) {
         console.log(generateMarkdownReport(reportData));
       } else {
-        // Default: pretty terminal format
+        // Default: pretty terminal format (desktop section)
         console.log(formatTerminalReport(reportData));
+        
+        // Print mobile section if dual scan
+        if (!desktopOnly && dualResult && mobileGradeResult) {
+          const mobileReportData: ReportData = {
+            url,
+            pageTitle: dualResult.pageTitle,
+            letterGrade: mobileGradeResult.grade,
+            score: mobileGradeResult.score,
+            scannedAt: Date.now(),
+            violations: dualResult.mobile.violations,
+            scanMode: dualResult.mobile.safeMode ? "safe" : "full",
+            rawViolations: dualResult.mobile.rawViolations,
+          };
+          console.log(chalk.bold("\n  ── Mobile Viewport (390×844) ──\n"));
+          console.log(formatTerminalReport(mobileReportData));
+        }
+        
+        // Show combined grade for dual scans
+        if (combinedGradeResult) {
+          const colorFn = gradeColor(combinedGradeResult.grade);
+          console.log(chalk.bold("  ── Combined Grade ──\n"));
+          console.log(`  ${colorFn(`${combinedGradeResult.grade} (${combinedGradeResult.score}/100)`)} ${chalk.dim("(60% desktop + 40% mobile)")}\n`);
+        }
       }
     },
   );

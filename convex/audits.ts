@@ -216,6 +216,22 @@ export const updateAuditWithResults = mutation({
     screenshotId: v.optional(v.id("_storage")),
     // Detected website platform/CMS (e.g. "wordpress", "squarespace")
     platform: v.optional(v.string()),
+    // Mobile viewport results (optional — missing for desktop-only scans)
+    mobileViolations: v.optional(v.object({
+      critical: v.number(),
+      serious: v.number(),
+      moderate: v.number(),
+      minor: v.number(),
+      total: v.number(),
+    })),
+    mobileLetterGrade: v.optional(v.union(
+      v.literal("A"), v.literal("B"), v.literal("C"), v.literal("D"), v.literal("F")
+    )),
+    mobileScore: v.optional(v.number()),
+    mobileRawViolations: v.optional(v.string()),
+    mobileScreenshotId: v.optional(v.id("_storage")),
+    mobileScanMode: v.optional(v.union(v.literal("full"), v.literal("safe"))),
+    mobileTruncated: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     await verifyAuditOwnership(ctx, args.auditId);
@@ -268,6 +284,8 @@ export const updateAuditAIOnly = mutation({
     aiSummary: v.string(),
     topIssues: v.array(v.string()),
     platformTip: v.optional(v.string()),
+    mobileAiSummary: v.optional(v.string()),
+    mobileTopIssues: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
     await verifyAuditOwnership(ctx, args.auditId);
@@ -275,6 +293,8 @@ export const updateAuditAIOnly = mutation({
       aiSummary: args.aiSummary,
       topIssues: args.topIssues,
       ...(args.platformTip ? { platformTip: args.platformTip } : {}),
+      ...(args.mobileAiSummary ? { mobileAiSummary: args.mobileAiSummary } : {}),
+      ...(args.mobileTopIssues ? { mobileTopIssues: args.mobileTopIssues } : {}),
     });
   },
 });
@@ -289,6 +309,9 @@ export const deleteAudit = mutation({
 
     if (audit.screenshotId) {
       await ctx.storage.delete(audit.screenshotId);
+    }
+    if (audit.mobileScreenshotId) {
+      await ctx.storage.delete(audit.mobileScreenshotId);
     }
 
     await ctx.db.delete(args.auditId);
@@ -328,6 +351,16 @@ export const getScreenshotUrl = query({
     const audit = await ctx.db.get(args.auditId);
     if (!audit?.screenshotId) return null;
     return await ctx.storage.getUrl(audit.screenshotId);
+  },
+});
+
+// Get the mobile screenshot URL for an audit (resolves storageId → serving URL)
+export const getMobileScreenshotUrl = query({
+  args: { auditId: v.id("audits") },
+  handler: async (ctx, args) => {
+    const audit = await ctx.db.get(args.auditId);
+    if (!audit?.mobileScreenshotId) return null;
+    return await ctx.storage.getUrl(audit.mobileScreenshotId);
   },
 });
 

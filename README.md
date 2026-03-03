@@ -19,21 +19,23 @@ A friendly accessibility audit tool that provides AI insights and specific, acti
 ## Features
 
 - 🔍 **Automated Accessibility Scanning** — Uses axe-core to test websites against WCAG 2.2 guidelines
-- 🤖 **AI-Powered Insights** — GPT-4.1 Mini translates technical violations into plain English explanations
-- 📊 **Letter Grade System** — Easy-to-understand A-F grading based on violation severity
+- 📱 **Dual Viewport Scanning** — Scans at both desktop (1920x1080) and mobile (390x844) viewports in parallel, with separate results for each
+- 🤖 **AI-Powered Insights** — GPT-4.1 Mini translates technical violations into plain English, with separate analysis per viewport
+- 📊 **Letter Grade System** — Per-viewport grades plus a combined weighted grade (60% desktop + 40% mobile)
+- 🧩 **Platform & Framework Detection** — Detects CMS platforms (WordPress, Shopify, Squarespace, etc.) and frontend frameworks (Next.js, React, Angular, Svelte, etc.) with confidence levels, providing platform-specific fix advice
 - 🗄️ **Community Database** — Browse and search accessibility audits shared by other users
 - 👤 **User Accounts** — Save and manage your audit history with Clerk authentication
 - ⚡ **Real-time Updates** — Live status updates as scans progress
 - 🌗 **Light/Dark Themes** — Modern, accessible interface built with Tailwind CSS v4
-- 📋 **Export Reports** — Copy markdown reports for documentation or issue tracking
+- 📋 **Export Reports** — Copy markdown reports including both desktop and mobile results
 - 🛡️ **Rate Limiting & Concurrency** — Per-IP sliding window (5 scans/hour) and global concurrency cap via Upstash Redis
 - 🔒 **SSRF Protection** — URL validation blocks private IP ranges and non-HTTP schemes in production
-- 📸 **Page Screenshots** — Captures a JPEG screenshot at scan time so users can verify the scanner reached the real site (not a firewall page)
+- 📸 **Page Screenshots** — Captures JPEG screenshots at both viewports so users can verify the scanner reached the real site
 - 🧱 **WAF / Bot-Block Detection** — Detects when a site's firewall blocks the scanner and warns the user instead of returning misleading results
 - 🔄 **Safe Mode Fallback** — Automatically retries with a reduced rule set when complex sites crash the full axe-core scan
 - 🚨 **Error Boundary** — Global React error boundary catches rendering crashes with a friendly recovery UI
 - ⚙️ **Graceful Degradation** — Runs without env vars for local demos; a banner warns which features are disabled
-- 💻 **CLI Tool** — Scan sites from your terminal with `a11ygarden <url>` and pipe markdown reports to files
+- 💻 **CLI Tool** — Scan sites from your terminal with `a11ygarden <url>`, dual-viewport by default with a `--desktop-only` flag
 
 ---
 
@@ -112,8 +114,11 @@ npm run cli -- example.com
 ### Examples
 
 ```bash
-# Basic scan (pretty terminal output)
+# Basic scan — scans desktop + mobile viewports in parallel
 npm run cli -- walmart.com
+
+# Desktop-only scan (skip mobile viewport)
+npm run cli -- walmart.com --desktop-only
 
 # Export a markdown report to a file
 npm run cli -- walmart.com --markdown > walmart-a11y.md
@@ -124,7 +129,7 @@ npm run cli -- walmart.com --json
 # Skip AI summary even when OPENAI_API_KEY is set
 npm run cli -- walmart.com --no-ai
 
-# Save a screenshot of the scanned page
+# Save screenshots of the scanned page (desktop + mobile)
 npm run cli -- walmart.com --screenshot
 
 # Save screenshot to a custom path
@@ -151,10 +156,11 @@ a11ygarden walmart.com --markdown > report.md
 
 | Flag | Description |
 |------|-------------|
+| `--desktop-only` | Skip mobile viewport scan (desktop only) |
 | `--markdown` | Output a markdown report instead of the default terminal format |
-| `--json` | Output raw JSON |
+| `--json` | Output raw JSON (includes separate `desktop` and `mobile` objects) |
 | `--no-ai` | Skip AI summary even when `OPENAI_API_KEY` is set |
-| `--screenshot [path]` | Save a JPEG screenshot of the scanned page (default: `screenshot.jpg`) |
+| `--screenshot [path]` | Save JPEG screenshots (desktop + `screenshot-mobile.jpg` for dual scans) |
 | `--local` | Force local Playwright even when `BROWSERLESS_URL` is set |
 | `-V, --version` | Show version number |
 | `-h, --help` | Show help |
@@ -334,43 +340,44 @@ The app is designed to degrade gracefully rather than crash:
 
 ```
 ├── cli/                       # CLI tool
-│   ├── index.ts              # CLI entry point (commander + ora)
+│   ├── index.ts              # CLI entry point (dual-viewport + --desktop-only)
 │   └── bin.mjs               # Bin wrapper for npm link / npx
 ├── convex/                    # Convex backend
-│   ├── schema.ts             # Database schema
-│   ├── audits.ts             # Audit queries & mutations
-│   ├── ai.ts                 # OpenAI integration (Convex action)
+│   ├── schema.ts             # Database schema (desktop + mobile fields)
+│   ├── audits.ts             # Audit queries & mutations (incl. mobile)
+│   ├── ai.ts                 # OpenAI integration (parallel desktop/mobile)
 │   ├── auth.config.ts        # Clerk ↔ Convex auth config
 │   └── lib/
-│       ├── grading.ts        # Grading algorithm (source of truth)
+│       ├── grading.ts        # Grading algorithm + combined grade
 │       └── grading.test.ts   # Grading tests
 ├── src/
 │   ├── app/                  # Next.js App Router
 │   │   ├── page.tsx          # Home page
 │   │   ├── providers.tsx     # Convex/Clerk providers (conditional)
 │   │   ├── demo/             # Demo mode (no auth required)
-│   │   ├── results/          # Audit results pages
+│   │   ├── results/          # Results pages (tabbed desktop/mobile)
 │   │   ├── database/         # Community audit database
 │   │   ├── dashboard/        # User dashboard (auth required)
 │   │   ├── sign-in/          # Clerk sign-in page
 │   │   ├── sign-up/          # Clerk sign-up page
 │   │   └── api/
-│   │       ├── scan/          # Scan API (delegates to shared scanner)
+│   │       ├── scan/          # Scan API (dual-viewport via scanUrlDual)
 │   │       └── ai-summary/    # AI summary API (local mode + demo)
 │   ├── components/
 │   │   ├── ErrorBoundary.tsx      # Global React error boundary
-│   │   ├── ScanForm.tsx           # URL input + scan orchestration
-│   │   ├── ScreenshotSection.tsx  # Collapsible screenshot viewer
+│   │   ├── ScanForm.tsx           # URL input + dual-viewport orchestration
+│   │   ├── ScreenshotSection.tsx  # Screenshot viewer (desktop or mobile)
 │   │   ├── Navbar.tsx             # Top nav (dev links in development)
 │   │   ├── GradeBadge.tsx         # Letter grade display
 │   │   ├── ViolationCard.tsx      # Severity breakdown cards
 │   │   └── ThemeProvider.tsx      # Light/dark theme context
 │   └── lib/
-│       ├── scanner.ts        # Shared scan engine (Playwright + axe-core)
-│       ├── report.ts         # Shared markdown report generator
+│       ├── scanner.ts        # Scan engine (scanUrl + scanUrlDual)
+│       ├── platforms.ts      # Platform labels, confidence levels
+│       ├── report.ts         # Markdown report (desktop + mobile sections)
 │       ├── mode.ts           # Local vs. web mode detection
-│       ├── ai-summary.ts     # Standalone OpenAI integration (CLI + local mode)
-│       ├── grading.ts        # Client-side grading (mirrors Convex)
+│       ├── ai-summary.ts     # OpenAI integration (CLI + local mode)
+│       ├── grading.ts        # Client-side grading (re-exports Convex)
 │       ├── rate-limit.ts     # Upstash rate limiting & concurrency
 │       └── url-validator.ts  # SSRF-safe URL validation
 └── middleware.ts             # Clerk auth middleware
@@ -383,17 +390,23 @@ The app is designed to degrade gracefully rather than crash:
 ### Web App
 
 ```
-┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐
-│  User    │    │  Rate    │    │  SSRF    │    │Playwright│    │Screenshot│
-│  submits │ ─▶ │  Limit   │ ─▶ │  Check   │ ─▶ │+ axe-core│ ─▶ │+ Truncate│
-│  URL     │    │ (Upstash)│    │          │    │          │    │ if >500KB│
-└──────────┘    └──────────┘    └──────────┘    └──────────┘    └──────────┘
-                                                                      │
-                                                                      ▼
+┌──────────┐    ┌──────────┐    ┌──────────┐    ┌─────────────────────────────┐
+│  User    │    │  Rate    │    │  SSRF    │    │   Single browser, two       │
+│  submits │ ─▶ │  Limit   │ ─▶ │  Check   │ ─▶ │   contexts in parallel:     │
+│  URL     │    │ (Upstash)│    │          │    │                             │
+└──────────┘    └──────────┘    └──────────┘    │  ┌─────────┐ ┌──────────┐  │
+                                                │  │Desktop  │ │ Mobile   │  │
+                                                │  │1920×1080│ │ 390×844  │  │
+                                                │  │axe+shot │ │ axe+shot │  │
+                                                │  └────┬────┘ └────┬─────┘  │
+                                                └───────┼───────────┼────────┘
+                                                        │           │
+                                                        ▼           ▼
                 ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐
-                │  Results │ ◀─ │  OpenAI  │ ◀─ │  Convex  │ ◀─ │  Grade   │
-                │  Page    │    │ Analysis │    │ Database │    │Calculated│
-                │(+screenshot)  │(bkground)|    │(+file    │    │          │
+                │ Tabbed   │ ◀─ │  OpenAI  │ ◀─ │  Convex  │ ◀─ │  Grade   │
+                │ Results  │    │ Analysis │    │ Database │    │  (per-VP │
+                │ Page     │    │(desktop +│    │(+desktop │    │+ combined│
+                │(D/M tabs)│    │ mobile)  │    │& mobile  │    │ 60/40)   │
                 └──────────┘    └──────────┘    │ storage) │    └──────────┘
                                                 └──────────┘
 ```
@@ -401,30 +414,36 @@ The app is designed to degrade gracefully rather than crash:
 ### CLI
 
 ```
-┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐
-│  User    │    │Playwright│    │Screenshot│    │  OpenAI  │    │ Markdown │
-│  runs    │ ─▶ │+ axe-core│ ─▶ │+ Grade   │ ─▶ │ Summary  │ ─▶ │ Report   │
-│  CLI     │    │(local or │    │Calculated│    │(optional)│    │ → stdout │
-└──────────┘    │Browserls)│    └──────────┘    └──────────┘    └──────────┘
-                └──────────┘          │
-                                      ▼ (if --screenshot)
-                                ┌──────────┐
-                                │  JPEG    │
-                                │  → disk  │
-                                └──────────┘
+┌──────────┐    ┌────────────────────────────────┐    ┌──────────┐    ┌──────────┐
+│  User    │    │ Dual-viewport scan (parallel)  │    │  OpenAI  │    │ Terminal │
+│  runs    │ ─▶ │                                │ ─▶ │ Summary  │ ─▶ │ Report   │
+│  CLI     │    │  Desktop ctx  +  Mobile ctx    │    │(optional)│    │(D+M+comb)│
+└──────────┘    │  (or --desktop-only for one)   │    └──────────┘    └──────────┘
+                └────────────────────────────────┘
+                         │            │
+                         ▼            ▼ (if --screenshot)
+                   ┌──────────┐  ┌─────────────────┐
+                   │  Grade   │  │ screenshot.jpg   │
+                   │(combined)│  │ screenshot-      │
+                   └──────────┘  │ mobile.jpg       │
+                                 └─────────────────┘
 ```
+
+### Scan Flow
 
 1. **User enters a URL** — The scan form validates, normalizes, and strips `www.`
 2. **Rate limit checked** — Per-IP sliding window (5/hour) and global concurrency cap (10 simultaneous)
 3. **URL validated** — SSRF protection blocks private IPs and non-HTTP schemes in production
-4. **Playwright scans** — A headless browser navigates to the page and runs axe-core; falls back to safe mode if the full scan crashes on complex sites
-5. **WAF check** — If a firewall blocked the scanner, the user gets a clear message instead of misleading results
-6. **Screenshot captured** — A JPEG screenshot is taken of the loaded page (before axe injection) so users can verify the scanner saw the real site
-7. **Results truncated** — If raw violations exceed 500 KB, node arrays are trimmed to protect storage
-8. **Audit saved** — Only after a successful scan is the audit record created in Convex (avoids orphan records on failure). The screenshot is uploaded to Convex file storage and linked to the audit.
-9. **Grade calculated** — A letter grade (A–F) is computed using weighted penalties and hard caps
-10. **AI analyzes** — OpenAI generates a plain-English summary and prioritized recommendations (fires in the background)
-11. **Results displayed** — The user is redirected to the results page immediately; the AI summary streams in when ready. A collapsible screenshot section lets users verify the scanned page.
+4. **Browser connects** — A single browser (local Playwright or remote Browserless) opens two parallel contexts: desktop (1920x1080) and mobile (390x844, iPhone emulation with touch and UA)
+5. **Desktop navigates first** — The desktop context loads the page, runs the WAF/firewall check, and detects the platform/CMS/framework
+6. **Mobile navigates** — Only if the WAF check passes, the mobile context loads the same URL with mobile emulation
+7. **Parallel scan + screenshot** — axe-core and JPEG screenshots run on both contexts simultaneously via `Promise.all`
+8. **Results truncated** — If raw violations exceed 350 KB per viewport, node arrays are trimmed to stay under Convex's 1 MB document limit
+9. **Platform detected** — CMS platforms (WordPress, Shopify, etc.) and frameworks (Next.js, React, Angular, etc.) are identified from HTML markers, with confidence levels (high/medium)
+10. **Audit saved** — Scan results for both viewports are stored in Convex. Desktop and mobile screenshots are uploaded in parallel to file storage.
+11. **Grades calculated** — Per-viewport grades (A-F) plus a combined weighted grade (60% desktop + 40% mobile)
+12. **AI analyzes** — OpenAI generates separate summaries for desktop and mobile violations, plus platform-specific tips (fires in the background)
+13. **Results displayed** — A tabbed UI shows Desktop and Mobile results separately. Each tab has its own grade, violations, screenshot, AI summary, and top issues. The combined grade appears in the header.
 
 ---
 
@@ -455,7 +474,31 @@ The app is designed to degrade gracefully rather than crash:
 | Any serious violations | 72 (grade C) |
 | 3+ moderate violations | 85 (grade B) |
 
+### Combined Grade (Dual-Viewport)
+
+When both desktop and mobile results are available, the displayed grade is a weighted average:
+
+| Viewport | Weight |
+|----------|--------|
+| Desktop | 60% |
+| Mobile | 40% |
+
+Each viewport gets its own per-viewport grade (visible in the Desktop/Mobile tabs), while the header shows the combined grade. For desktop-only scans or pre-mobile audits, the desktop score is used directly.
+
 The algorithm version is tracked per audit, and grades are lazily recalculated when you view an older report after an algorithm update.
+
+---
+
+## Platform & Framework Detection
+
+The scanner identifies the CMS or framework powering a page by pattern-matching rendered HTML. When detected, the AI generates platform-specific fix advice (e.g., "Install the WP Accessibility plugin" for WordPress, or "Use `next/image` with required `alt` props" for Next.js).
+
+| Confidence | Platforms | Rationale |
+|------------|-----------|-----------|
+| **High** | WordPress, Squarespace, Shopify, Wix, Webflow, Drupal, Joomla, Ghost, HubSpot, Weebly, Next.js, Nuxt, Gatsby, Angular, Remix, Astro | Unique, unmistakable HTML markers |
+| **Medium** | React, Vue, Svelte | Base library heuristics that can occasionally appear on non-matching sites |
+
+Medium-confidence detections are surfaced with a qualifier in the UI and reports ("detected" label, hedged AI phrasing).
 
 ---
 
@@ -497,7 +540,7 @@ Add to Vercel environment variables:
 BROWSERLESS_TOKEN=your-token
 ```
 
-> **Tip:** Large scan results (500 KB+) are automatically truncated to protect Convex storage limits and client performance. Violation counts and grades remain accurate; only duplicate element examples are trimmed.
+> **Tip:** Large scan results are automatically truncated at 350 KB per viewport (desktop + mobile) to stay within Convex's 1 MB document limit. Violation counts and grades remain accurate; only duplicate element examples are trimmed.
 
 ### Convex Production
 

@@ -6,10 +6,10 @@ import { Id } from "../../../../convex/_generated/dataModel";
 import { GradeBadge } from "@/components/GradeBadge";
 import { ViolationCard } from "@/components/ViolationCard";
 import { StatusIndicator } from "@/components/StatusIndicator";
-import { calculateGrade, GRADING_VERSION } from "@/lib/grading";
+import { calculateGrade, calculateCombinedGrade, GRADING_VERSION } from "@/lib/grading";
 import { generateMarkdownReport, type AxeViolation, type ReportData } from "@/lib/report";
 import { buildResultsUrl, parseResultsSegments } from "@/lib/urls";
-import { PLATFORM_LABELS } from "@/lib/platforms";
+import { PLATFORM_LABELS, getPlatformConfidence } from "@/lib/platforms";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { use, useEffect, useRef, useState, useCallback } from "react";
@@ -22,6 +22,15 @@ interface Audit extends ReportData {
   domain: string;
   truncated?: boolean;
   platform?: string;
+  // Mobile viewport fields (optional — missing for pre-mobile audits)
+  mobileViolations?: { critical: number; serious: number; moderate: number; minor: number; total: number };
+  mobileLetterGrade?: string;
+  mobileScore?: number;
+  mobileRawViolations?: string;
+  mobileScanMode?: "full" | "safe";
+  mobileTruncated?: boolean;
+  mobileAiSummary?: string;
+  mobileTopIssues?: string[];
 }
 
 // Severity config using CSS vars
@@ -265,6 +274,7 @@ function DetailedViolationsAccordion({ rawViolations }: { rawViolations: string 
 function PlatformTipAccordion({ platform, platformTip }: { platform: string; platformTip: string }) {
   const [isOpen, setIsOpen] = useState(false);
   const label = PLATFORM_LABELS[platform] ?? platform;
+  const isMedium = getPlatformConfidence(platform) === "medium";
 
   return (
     <section className="garden-bed overflow-hidden">
@@ -278,9 +288,16 @@ function PlatformTipAccordion({ platform, platformTip }: { platform: string; pla
           <svg className="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
           </svg>
-          <span className="font-display font-semibold text-theme-primary">
-            {label} Tip
-          </span>
+          <div>
+            <span className="font-display font-semibold text-theme-primary">
+              {label} Tip{isMedium ? " (detected)" : ""}
+            </span>
+            {isMedium && (
+              <p className="text-xs text-theme-muted mt-0.5">
+                We detected {label} markers but aren&apos;t 100% certain
+              </p>
+            )}
+          </div>
         </div>
         <svg
           className={`w-5 h-5 text-theme-secondary transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
@@ -434,6 +451,20 @@ export default function ResultsPage({
   const closeSafeMode = useCallback(() => setSafeModeOpen(false), []);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   const [statusMessage, setStatusMessage] = useState("");
+
+  // Viewport tab state — default to desktop, sync with URL hash
+  const hasMobileData = !!audit?.mobileViolations;
+  const [activeViewport, setActiveViewport] = useState<"desktop" | "mobile">(() => {
+    if (typeof window !== "undefined" && window.location.hash === "#mobile") return "mobile";
+    return "desktop";
+  });
+
+  const switchViewport = useCallback((vp: "desktop" | "mobile") => {
+    setActiveViewport(vp);
+    if (typeof window !== "undefined") {
+      window.history.replaceState(null, "", `${window.location.pathname}#${vp}`);
+    }
+  }, []);
   const deleteButtonRef = useRef<HTMLButtonElement>(null);
   const deleteDialogRef = useRef<HTMLDialogElement>(null);
   const deleteCancelRef = useRef<HTMLButtonElement>(null);
@@ -509,11 +540,14 @@ export default function ResultsPage({
       !hasRecalculated.current
     ) {
       hasRecalculated.current = true;
-      const { score, grade } = calculateGrade(audit.violations);
+      const desktop = calculateGrade(audit.violations);
+      const combined = audit.mobileViolations
+        ? calculateCombinedGrade(desktop.score, calculateGrade(audit.mobileViolations).score)
+        : desktop;
       recalculateGrade({
         auditId: audit._id,
-        letterGrade: grade,
-        score,
+        letterGrade: combined.grade,
+        score: combined.score,
         gradingVersion: GRADING_VERSION,
       });
     }
@@ -838,184 +872,221 @@ export default function ResultsPage({
             </section>
           )}
 
-          {/* Safe Mode Banner */}
-          {audit.scanMode === "safe" && (
-            <>
-              <div
-                className="rounded-xl p-4 flex items-start gap-3 border"
-                style={{
-                  backgroundColor: 'var(--severity-moderate-bg)',
-                  borderColor: 'var(--severity-moderate-border)',
-                }}
-                role="note"
-              >
-                <div className="flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: 'var(--severity-moderate-bg)' }}>
-                  <svg className="w-4 h-4" style={{ color: 'var(--severity-moderate)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
-                  </svg>
-                </div>
-                <div className="flex-1">
-                  <h3 className="text-sm font-semibold mb-1" style={{ color: 'var(--severity-moderate)' }}>
-                    Safe Mode
-                  </h3>
-                  <p className="text-sm text-theme-secondary">
-                    Because of this site&apos;s complexity, this scan ran in Safe Mode.
-                    Not all checks were performed.
-                  </p>
-                  <button
-                    onClick={() => setSafeModeOpen(true)}
-                    className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium cursor-pointer hover:underline transition-colors"
-                    style={{ color: 'var(--severity-moderate)' }}
-                  >
-                    Learn More
-                    <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                    </svg>
-                  </button>
-                </div>
-              </div>
-              <SafeModeModal open={safeModeOpen} onClose={closeSafeMode} />
-            </>
-          )}
-
-          {/* Truncation Banner */}
-          {audit.truncated && (
-            <div
-              className="rounded-xl p-4 flex items-start gap-3 border"
-              style={{
-                backgroundColor: 'var(--severity-minor-bg)',
-                borderColor: 'var(--severity-minor-border)',
-              }}
-              role="note"
-            >
-              <div className="flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: 'var(--severity-minor-bg)' }}>
-                <svg className="w-4 h-4" style={{ color: 'var(--severity-minor)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-              </div>
-              <div>
-                <h3 className="text-sm font-semibold mb-1" style={{ color: 'var(--severity-minor)' }}>
-                  Large Scan — Some Details Trimmed
-                </h3>
-                <p className="text-sm text-theme-secondary">
-                  This site had a very large number of violations. To keep
-                  things fast, some duplicate element examples were trimmed from
-                  the detailed view. The violation counts and grades above are
-                  still accurate.
-                </p>
-              </div>
-            </div>
-          )}
-
-          {/* Page Screenshot (collapsible, for verification) */}
-          <ScreenshotSection auditId={audit._id} />
-
-          {/* Violations by Severity — "Garden Beds" */}
-          <section>
-            <h2 className="text-xl font-display font-bold text-theme-primary mb-4">
-              Issue Beds
-            </h2>
-            <ViolationCard violations={audit.violations} />
-          </section>
-
-          {/* AI Summary */}
-          <section className="garden-bed p-6 lg:p-8 bg-[var(--accent-bg)]" style={{ borderColor: 'var(--accent-border)' }}>
-            <div className="flex items-start gap-4">
-              <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-[var(--accent-bg)] border border-[var(--accent-border)] flex items-center justify-center">
-                {audit.aiSummary ? (
-                  <svg className="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
-                  </svg>
-                ) : (
-                  <svg className="w-5 h-5 text-accent animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden="true">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                  </svg>
-                )}
-              </div>
-              <div className="flex-1">
-                <h2 className="text-lg font-display font-semibold text-theme-primary mb-2">
-                  AI Summary
-                </h2>
-                {audit.aiSummary ? (
-                  <>
-                    <p className="text-theme-secondary leading-relaxed">
-                      {audit.aiSummary}
-                    </p>
-                    <p className="text-xs text-theme-muted mt-3 flex items-center gap-1.5">
-                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+          {/* Viewport Tabs (only shown when mobile data exists) */}
+          {hasMobileData && (
+            <div className="flex gap-1 p-1 rounded-xl bg-theme-secondary border border-theme" role="tablist" aria-label="Viewport results">
+              {(["desktop", "mobile"] as const).map((vp) => (
+                <button
+                  key={vp}
+                  role="tab"
+                  aria-selected={activeViewport === vp}
+                  aria-controls={`panel-${vp}`}
+                  onClick={() => switchViewport(vp)}
+                  className={`flex-1 px-4 py-2.5 rounded-lg text-sm font-semibold transition-all cursor-pointer ${
+                    activeViewport === vp
+                      ? "bg-theme-primary text-theme-primary shadow-sm"
+                      : "text-theme-muted hover:text-theme-secondary"
+                  }`}
+                >
+                  <span className="flex items-center justify-center gap-2">
+                    {vp === "desktop" ? (
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                       </svg>
-                      Powered by OpenAI GPT-4.1 Mini
-                    </p>
-                  </>
-                ) : (
-                  <div className="space-y-2" aria-label="Loading AI summary">
-                    <div className="h-4 bg-[var(--accent-bg)] rounded animate-pulse w-full" />
-                    <div className="h-4 bg-[var(--accent-bg)] rounded animate-pulse w-5/6" />
-                    <div className="h-4 bg-[var(--accent-bg)] rounded animate-pulse w-4/6" />
-                  </div>
-                )}
-              </div>
+                    ) : (
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                      </svg>
+                    )}
+                    {vp === "desktop" ? "Desktop" : "Mobile"}
+                    {vp === "desktop" && (
+                      <span className="text-xs opacity-60">({audit.letterGrade})</span>
+                    )}
+                    {vp === "mobile" && audit.mobileLetterGrade && (
+                      <span className="text-xs opacity-60">({audit.mobileLetterGrade})</span>
+                    )}
+                  </span>
+                </button>
+              ))}
             </div>
-          </section>
+          )}
 
-          {/* Top Issues — "Areas to Tend" */}
-          {audit.topIssues && audit.topIssues.length > 0 ? (
-            <section>
-              <h2 className="text-xl font-display font-bold text-theme-primary mb-4">
-                Areas to Tend First
-              </h2>
-              <div className="space-y-3">
-                {audit.topIssues.map((issue, index) => (
-                  <div
-                    key={index}
-                    className="flex gap-4 p-5 garden-bed"
-                  >
-                    <span className="flex-shrink-0 w-8 h-8 bg-[var(--btn-primary-bg)] text-white rounded-lg flex items-center justify-center text-sm font-display font-bold shadow-md">
-                      {index + 1}
-                    </span>
-                    <span className="text-theme-secondary leading-relaxed pt-1">
-                      {issue}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </section>
-          ) : !audit.aiSummary && audit.violations.total > 0 ? (
-            <section>
-              <h2 className="text-xl font-display font-bold text-theme-primary mb-4">
-                Areas to Tend First
-              </h2>
-              <div className="space-y-3">
-                {[1, 2].map((i) => (
-                  <div
-                    key={i}
-                    className="flex gap-4 p-5 garden-bed"
-                  >
-                    <span className="flex-shrink-0 w-8 h-8 bg-theme-tertiary rounded-lg animate-pulse" />
-                    <div className="flex-1 space-y-2 pt-1">
-                      <div className="h-4 bg-theme-tertiary rounded animate-pulse w-full" />
-                      <div className="h-4 bg-theme-tertiary rounded animate-pulse w-3/4" />
+          {/* --- Per-Viewport Content --- */}
+          {(() => {
+            const isDesktop = activeViewport === "desktop" || !hasMobileData;
+            const vpViolations = isDesktop ? audit.violations : (audit.mobileViolations ?? audit.violations);
+            const vpGrade = isDesktop ? audit.letterGrade : (audit.mobileLetterGrade ?? audit.letterGrade);
+            const vpScore = isDesktop
+              ? calculateGrade(audit.violations).score
+              : (audit.mobileScore ?? calculateGrade(audit.violations).score);
+            const vpScanMode = isDesktop ? audit.scanMode : audit.mobileScanMode;
+            const vpTruncated = isDesktop ? audit.truncated : audit.mobileTruncated;
+            // When both viewports have zero violations, we save a single shared summary
+            // under aiSummary (no separate mobileAiSummary). The mobile tab falls back to it.
+            const vpAiSummary = isDesktop
+              ? audit.aiSummary
+              : (audit.mobileAiSummary ?? (vpViolations.total === 0 ? audit.aiSummary : undefined));
+            const vpTopIssues = isDesktop
+              ? audit.topIssues
+              : (audit.mobileTopIssues ?? (vpViolations.total === 0 ? audit.topIssues : undefined));
+            // AI is "done" when the desktop summary exists (both are saved in a single mutation).
+            const aiDone = !!audit.aiSummary;
+            const vpRawViolations = isDesktop ? audit.rawViolations : audit.mobileRawViolations;
+            const vpViewport: "desktop" | "mobile" = isDesktop ? "desktop" : "mobile";
+
+            return (
+              <div id={`panel-${vpViewport}`} role="tabpanel" className="space-y-8">
+                {/* Viewport Grade */}
+                {hasMobileData && (
+                  <div className="flex items-center gap-4">
+                    <GradeBadge grade={vpGrade} score={vpScore} size="md" />
+                    <div>
+                      <p className="text-sm font-semibold text-theme-primary">
+                        {isDesktop ? "Desktop" : "Mobile"} Score
+                      </p>
+                      <p className="text-xs text-theme-muted">
+                        {isDesktop ? "1920×1080 viewport" : "390×844 viewport (iPhone 14/15)"}
+                      </p>
                     </div>
                   </div>
-                ))}
+                )}
+
+                {/* Safe Mode Banner */}
+                {vpScanMode === "safe" && (
+                  <>
+                    <div
+                      className="rounded-xl p-4 flex items-start gap-3 border"
+                      style={{ backgroundColor: 'var(--severity-moderate-bg)', borderColor: 'var(--severity-moderate-border)' }}
+                      role="note"
+                    >
+                      <div className="flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: 'var(--severity-moderate-bg)' }}>
+                        <svg className="w-4 h-4" style={{ color: 'var(--severity-moderate)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
+                        </svg>
+                      </div>
+                      <div className="flex-1">
+                        <h3 className="text-sm font-semibold mb-1" style={{ color: 'var(--severity-moderate)' }}>Safe Mode</h3>
+                        <p className="text-sm text-theme-secondary">
+                          Because of this site&apos;s complexity, the {isDesktop ? "desktop" : "mobile"} scan ran in Safe Mode. Not all checks were performed.
+                        </p>
+                        <button onClick={() => setSafeModeOpen(true)} className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium cursor-pointer hover:underline transition-colors" style={{ color: 'var(--severity-moderate)' }}>
+                          Learn More
+                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+                        </button>
+                      </div>
+                    </div>
+                    <SafeModeModal open={safeModeOpen} onClose={closeSafeMode} />
+                  </>
+                )}
+
+                {/* Truncation Banner */}
+                {vpTruncated && (
+                  <div className="rounded-xl p-4 flex items-start gap-3 border" style={{ backgroundColor: 'var(--severity-minor-bg)', borderColor: 'var(--severity-minor-border)' }} role="note">
+                    <div className="flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: 'var(--severity-minor-bg)' }}>
+                      <svg className="w-4 h-4" style={{ color: 'var(--severity-minor)' }} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-semibold mb-1" style={{ color: 'var(--severity-minor)' }}>Large Scan — Some Details Trimmed</h3>
+                      <p className="text-sm text-theme-secondary">
+                        This site had a very large number of violations at the {isDesktop ? "desktop" : "mobile"} viewport. Some duplicate element examples were trimmed. Violation counts and grades are still accurate.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Page Screenshot */}
+                <ScreenshotSection auditId={audit._id} viewport={vpViewport} />
+
+                {/* Violations by Severity */}
+                <section>
+                  <h2 className="text-xl font-display font-bold text-theme-primary mb-4">Issue Beds</h2>
+                  <ViolationCard violations={vpViolations} />
+                </section>
+
+                {/* AI Summary */}
+                <section className="garden-bed p-6 lg:p-8 bg-[var(--accent-bg)]" style={{ borderColor: 'var(--accent-border)' }}>
+                  <div className="flex items-start gap-4">
+                    <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-[var(--accent-bg)] border border-[var(--accent-border)] flex items-center justify-center">
+                      {vpAiSummary || aiDone ? (
+                        <svg className="w-5 h-5 text-accent" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                        </svg>
+                      ) : (
+                        <svg className="w-5 h-5 text-accent animate-spin" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                        </svg>
+                      )}
+                    </div>
+                    <div className="flex-1">
+                      <h2 className="text-lg font-display font-semibold text-theme-primary mb-2">AI Summary</h2>
+                      {vpAiSummary ? (
+                        <>
+                          <p className="text-theme-secondary leading-relaxed">{vpAiSummary}</p>
+                          <p className="text-xs text-theme-muted mt-3 flex items-center gap-1.5">
+                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+                            Powered by OpenAI GPT-4.1 Mini
+                          </p>
+                        </>
+                      ) : aiDone ? (
+                        <p className="text-theme-muted italic">
+                          No AI summary available for this viewport.
+                        </p>
+                      ) : (
+                        <div className="space-y-2" aria-label="Loading AI summary">
+                          <div className="h-4 bg-[var(--accent-bg)] rounded animate-pulse w-full" />
+                          <div className="h-4 bg-[var(--accent-bg)] rounded animate-pulse w-5/6" />
+                          <div className="h-4 bg-[var(--accent-bg)] rounded animate-pulse w-4/6" />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </section>
+
+                {/* Top Issues */}
+                {vpTopIssues && vpTopIssues.length > 0 ? (
+                  <section>
+                    <h2 className="text-xl font-display font-bold text-theme-primary mb-4">Areas to Tend First</h2>
+                    <div className="space-y-3">
+                      {vpTopIssues.map((issue, index) => (
+                        <div key={index} className="flex gap-4 p-5 garden-bed">
+                          <span className="flex-shrink-0 w-8 h-8 bg-[var(--btn-primary-bg)] text-white rounded-lg flex items-center justify-center text-sm font-display font-bold shadow-md">{index + 1}</span>
+                          <span className="text-theme-secondary leading-relaxed pt-1">{issue}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                ) : !vpAiSummary && !aiDone && vpViolations.total > 0 ? (
+                  <section>
+                    <h2 className="text-xl font-display font-bold text-theme-primary mb-4">Areas to Tend First</h2>
+                    <div className="space-y-3">
+                      {[1, 2].map((i) => (
+                        <div key={i} className="flex gap-4 p-5 garden-bed">
+                          <span className="flex-shrink-0 w-8 h-8 bg-theme-tertiary rounded-lg animate-pulse" />
+                          <div className="flex-1 space-y-2 pt-1">
+                            <div className="h-4 bg-theme-tertiary rounded animate-pulse w-full" />
+                            <div className="h-4 bg-theme-tertiary rounded animate-pulse w-3/4" />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                ) : null}
+
+                {/* Platform-Specific Tip (shared, only shown on desktop tab) */}
+                {isDesktop && audit.platformTip && audit.platform && PLATFORM_LABELS[audit.platform] && (
+                  <PlatformTipAccordion platform={audit.platform} platformTip={audit.platformTip} />
+                )}
+
+                {/* Detailed Violations Accordion */}
+                {vpRawViolations && vpViolations.total > 0 && (
+                  <DetailedViolationsAccordion rawViolations={vpRawViolations} />
+                )}
               </div>
-            </section>
-          ) : null}
-
-          {/* Platform-Specific Tip (accordion) */}
-          {audit.platformTip && audit.platform && PLATFORM_LABELS[audit.platform] && (
-            <PlatformTipAccordion
-              platform={audit.platform}
-              platformTip={audit.platformTip}
-            />
-          )}
-
-          {/* Detailed Violations Accordion */}
-          {audit.rawViolations && audit.violations.total > 0 && (
-            <DetailedViolationsAccordion rawViolations={audit.rawViolations} />
-          )}
+            );
+          })()}
 
           {/* Audit History */}
           <AuditHistoryTimeline

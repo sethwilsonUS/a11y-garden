@@ -62,10 +62,10 @@ async function getAxeCoreSource(): Promise<string> {
 // Raw-violations size cap
 // ---------------------------------------------------------------------------
 // Convex document fields have a 1 MB limit, and huge payloads also slow down
-// the client.  We cap the serialised violations at 500 KB and progressively
+// the client.  We cap the serialised violations at 350 KB and progressively
 // trim node arrays (keeping at least one node per rule) until it fits.
 
-const MAX_RAW_VIOLATIONS_CHARS = 512_000; // 500 KB in characters
+const MAX_RAW_VIOLATIONS_CHARS = 358_000; // 350 KB in characters
 
 export interface AxeNodeRaw {
   html?: string;
@@ -204,11 +204,47 @@ function rewriteLocalhostForDocker(
  * Threshold: a 1920×1080 all-white JPEG at q75 is typically 15-25 KB.
  * Anything under 30 KB is suspiciously blank.
  */
-function isLikelyBlankScreenshot(buffer: Buffer): boolean {
-  // A 1920×1080 JPEG of a real web page is typically 200-600 KB.
-  // A plain white/solid colour page compresses to ~15-25 KB.
-  return buffer.length < 30_000;
+function isLikelyBlankScreenshot(buffer: Buffer, viewportWidth: number = 1920): boolean {
+  // Mobile viewports produce much smaller JPEGs, so use a lower threshold.
+  const threshold = viewportWidth <= 500 ? 8_000 : 30_000;
+  return buffer.length < threshold;
 }
+
+// ---------------------------------------------------------------------------
+// Viewport configs & stealth
+// ---------------------------------------------------------------------------
+
+const STEALTH_INIT_SCRIPT = () => {
+  Object.defineProperty(navigator, "webdriver", { get: () => false });
+  Object.defineProperty(navigator, "plugins", { get: () => [1, 2, 3, 4, 5] });
+  Object.defineProperty(navigator, "languages", { get: () => ["en-US", "en"] });
+  (window as unknown as Record<string, unknown>).chrome = { runtime: {} };
+};
+
+export const DESKTOP_CONFIG = {
+  viewport: { width: 1920, height: 1080 },
+  userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  extraHTTPHeaders: {
+    "Accept-Language": "en-US,en;q=0.9",
+    "Sec-CH-UA": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+    "Sec-CH-UA-Mobile": "?0",
+    "Sec-CH-UA-Platform": '"macOS"',
+  },
+} as const;
+
+export const MOBILE_CONFIG = {
+  viewport: { width: 390, height: 844 },
+  userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+  isMobile: true,
+  hasTouch: true,
+  deviceScaleFactor: 3,
+  extraHTTPHeaders: {
+    "Accept-Language": "en-US,en;q=0.9",
+    "Sec-CH-UA": '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+    "Sec-CH-UA-Mobile": "?1",
+    "Sec-CH-UA-Platform": '"iOS"',
+  },
+} as const;
 
 // ---------------------------------------------------------------------------
 // Custom error types
@@ -262,12 +298,29 @@ export interface ScanOptions {
   captureScreenshot?: boolean;
 }
 
+export interface ViewportScanResult {
+  violations: ViolationCounts;
+  rawViolations: string;
+  safeMode: boolean;
+  truncated: boolean;
+  screenshot?: Buffer;
+  screenshotWarning?: string;
+  warning?: string;
+}
+
+export interface DualScanResult {
+  desktop: ViewportScanResult;
+  mobile: ViewportScanResult;
+  pageTitle: string;
+  platform?: string;
+}
+
 // ---------------------------------------------------------------------------
 // Platform / CMS detection
 // ---------------------------------------------------------------------------
 
 // Re-export platform labels so consumers can import from either location
-export { PLATFORM_LABELS } from "./platforms";
+export { PLATFORM_LABELS, PLATFORM_CONFIDENCE, getPlatformConfidence } from "./platforms";
 
 /**
  * Detect the platform/CMS powering a page.
@@ -416,6 +469,64 @@ async function detectPlatform(
   )
     platform = "weebly";
 
+  // ---- Meta-frameworks (high confidence) -----------------------------------
+
+  // Next.js
+  else if (
+    (signal = matched('id="__next"', "__next_css__", "/_next/", "_next/static"))
+  )
+    platform = "nextjs";
+
+  // Nuxt
+  else if (
+    (signal = matched('id="__nuxt"', "__nuxt_page", "/_nuxt/", "nuxt.config"))
+  )
+    platform = "nuxt";
+
+  // Gatsby
+  else if (
+    (signal = matched('id="___gatsby"', "/gatsby-", "gatsby-image", "gatsby-plugin"))
+  )
+    platform = "gatsby";
+
+  // Angular
+  else if (
+    (signal = matched("ng-version=", "ng-app", "ng-controller", "_ngcontent-"))
+  )
+    platform = "angular";
+
+  // Remix
+  else if (
+    (signal = matched('id="remix-"', "__remix", "remix-run", 'data-remix'))
+  )
+    platform = "remix";
+
+  // Astro
+  else if (
+    (signal = matched("astro-island", "astro-slot", "data-astro-"))
+  )
+    platform = "astro";
+
+  // ---- Base libraries (medium confidence) ----------------------------------
+
+  // React (check after Next.js/Gatsby/Remix which use React internally)
+  else if (
+    (signal = matched("data-reactroot", "data-reactid", "__react"))
+  )
+    platform = "react";
+
+  // Vue (check after Nuxt which uses Vue internally)
+  else if (
+    (signal = matched("data-v-", "__vue", "vue-app", 'id="app" data-v-'))
+  )
+    platform = "vue";
+
+  // Svelte
+  else if (html.match(/class="[^"]*svelte-[a-z0-9]/)) {
+    signal = "svelte class pattern";
+    platform = "svelte";
+  }
+
   if (platform) {
     console.log(`[Platform] Detected: ${platform} (matched "${signal}")`);
   } else {
@@ -492,6 +603,152 @@ const SAFE_RULES = [
   "marquee",
   "server-side-image-map",
 ];
+
+// ---------------------------------------------------------------------------
+// Reusable helpers for scan functions
+// ---------------------------------------------------------------------------
+
+async function navigateAndWait(
+  page: import("playwright").Page,
+  url: string,
+  isRemoteBrowser: boolean,
+): Promise<import("playwright").Response | null> {
+  const response = await page.goto(url, {
+    waitUntil: "domcontentloaded",
+    timeout: 30000,
+  });
+  await page.waitForLoadState("load", { timeout: 15000 }).catch(() => {});
+  await page.waitForTimeout(isRemoteBrowser ? 3000 : 2000);
+  return response;
+}
+
+async function capturePageScreenshot(
+  page: import("playwright").Page,
+  viewportWidth: number,
+): Promise<{ screenshot?: Buffer; screenshotWarning?: string }> {
+  try {
+    let screenshot = await page.screenshot({
+      type: "jpeg",
+      quality: 75,
+      fullPage: false,
+    });
+
+    if (screenshot && isLikelyBlankScreenshot(screenshot, viewportWidth)) {
+      await page.waitForTimeout(4000);
+      const retryScreenshot = await page.screenshot({
+        type: "jpeg",
+        quality: 75,
+        fullPage: false,
+      });
+      if (retryScreenshot && !isLikelyBlankScreenshot(retryScreenshot, viewportWidth)) {
+        screenshot = retryScreenshot;
+      } else {
+        return {
+          screenshot,
+          screenshotWarning:
+            "Screenshot appears blank. The page may not have fully rendered " +
+            "(e.g. client-side JS still loading, auth wall, or empty page).",
+        };
+      }
+    }
+
+    return { screenshot };
+  } catch {
+    return {};
+  }
+}
+
+async function runAxeOnPage(
+  page: import("playwright").Page,
+  axeSource: string,
+): Promise<{
+  violations: ViolationCounts;
+  rawViolations: string;
+  safeMode: boolean;
+  truncated: boolean;
+  warning?: string;
+}> {
+  await page.evaluate(axeSource);
+
+  let results;
+  let usedSafeMode = false;
+
+  const fullScanResult = await page
+    .evaluate(async () => {
+      // @ts-expect-error axe is injected globally
+      const axe = window.axe;
+      axe.reset();
+      return await axe.run(document.body, { resultTypes: ["violations"] });
+    })
+    .catch((error: Error) => ({ error: error.message }));
+
+  if ("error" in fullScanResult && fullScanResult.error) {
+    console.error(`Full scan failed (${fullScanResult.error}), retrying with safe rules...`);
+
+    results = await page
+      .evaluate(async (rules: string[]) => {
+        // @ts-expect-error axe is injected globally
+        const axe = window.axe;
+        axe.reset();
+        try {
+          return await axe.run(document.body, {
+            runOnly: { type: "rule", values: rules },
+            resultTypes: ["violations"],
+            elementRef: false,
+          });
+        } catch (e) {
+          console.error("Safe mode failed, trying minimal scan:", e);
+          const mainEl =
+            document.querySelector("main") ||
+            document.querySelector("article") ||
+            document.querySelector("#content") ||
+            document.querySelector("#main");
+          if (mainEl) {
+            try {
+              return await axe.run(mainEl, {
+                runOnly: {
+                  type: "rule",
+                  values: ["image-alt", "link-name", "button-name", "label", "document-title"],
+                },
+                resultTypes: ["violations"],
+                elementRef: false,
+              });
+            } catch { /* Even minimal scan failed */ }
+          }
+          return { violations: [], _warning: "Site too complex for automated scanning" };
+        }
+      }, SAFE_RULES)
+      .catch((error: Error) => ({ error: error.message, violations: [] }));
+
+    usedSafeMode = true;
+  } else {
+    results = fullScanResult;
+  }
+
+  if ("error" in results && results.error) {
+    throw new Error(`Accessibility scan failed: ${results.error}`);
+  }
+
+  const warning = "_warning" in results ? (results._warning as string) : undefined;
+
+  const violations: ViolationCounts = {
+    critical: 0, serious: 0, moderate: 0, minor: 0,
+    total: results.violations.length,
+  };
+
+  results.violations.forEach((violation: { impact?: string }) => {
+    if (violation.impact === "critical") violations.critical++;
+    else if (violation.impact === "serious") violations.serious++;
+    else if (violation.impact === "moderate") violations.moderate++;
+    else violations.minor++;
+  });
+
+  const { serialized: rawViolations, truncated } = truncateViolations(
+    results.violations as AxeViolationRaw[],
+  );
+
+  return { violations, rawViolations, safeMode: usedSafeMode, truncated, ...(warning && { warning }) };
+}
 
 // ---------------------------------------------------------------------------
 // Main scan function
@@ -772,7 +1029,7 @@ export async function scanUrl(
       else violations.minor++;
     });
 
-    // Truncate raw violations if they exceed the 500 KB cap
+    // Truncate raw violations if they exceed the 350 KB cap
     const { serialized: rawViolations, truncated } = truncateViolations(
       results.violations as AxeViolationRaw[],
     );
@@ -796,6 +1053,145 @@ export async function scanUrl(
       ...(combinedWarnings && { warning: combinedWarnings }),
       ...(screenshot && { screenshot }),
       ...(screenshotWarning && { screenshotWarning }),
+      ...(platform && { platform }),
+    };
+  } finally {
+    await browser.close();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Dual-viewport scan function
+// ---------------------------------------------------------------------------
+
+/**
+ * Scan a URL at both desktop and mobile viewports in parallel.
+ *
+ * Uses a single browser connection with two contexts (works identically
+ * for local Playwright and remote Browserless.io — both share one CDP session).
+ *
+ * Flow:
+ *   1. Connect/launch browser
+ *   2. Create desktop context, navigate, WAF check, platform detection
+ *   3. Create mobile context, navigate
+ *   4. Run axe + screenshot on both in parallel
+ *   5. Return combined results
+ */
+export async function scanUrlDual(
+  url: string,
+  options: ScanOptions = {},
+): Promise<DualScanResult> {
+  const { url: effectiveUrl, rewritten: urlRewritten } =
+    rewriteLocalhostForDocker(url, options.browserWSEndpoint);
+
+  const browser = options.browserWSEndpoint
+    ? await chromium.connectOverCDP(options.browserWSEndpoint)
+    : await chromium.launch({ headless: true });
+
+  try {
+    const isRemoteBrowser = !!options.browserWSEndpoint;
+
+    // ---- Desktop context (also serves as the WAF probe) ----------------------
+    const desktopContext = await browser.newContext({
+      ignoreHTTPSErrors: true,
+      viewport: DESKTOP_CONFIG.viewport,
+      colorScheme: "light",
+      userAgent: DESKTOP_CONFIG.userAgent,
+      extraHTTPHeaders: { ...DESKTOP_CONFIG.extraHTTPHeaders },
+    });
+    const desktopPage = await desktopContext.newPage();
+    await desktopPage.addInitScript(STEALTH_INIT_SCRIPT);
+
+    const desktopResponse = await navigateAndWait(desktopPage, effectiveUrl, isRemoteBrowser);
+
+    // Grab page title from desktop
+    const pageTitle = await desktopPage.title().catch(() => "");
+
+    // Platform detection (once, on desktop)
+    const platform = await detectPlatform(desktopPage).catch((err) => {
+      console.error("[Platform] Detection failed:", err);
+      return undefined;
+    });
+
+    // WAF check on desktop
+    const httpStatus = desktopResponse?.status() ?? 200;
+    const bodyText = await desktopPage
+      .evaluate(() => document.body?.innerText?.substring(0, 2000) ?? "")
+      .catch(() => "");
+
+    const blockedTitlePatterns =
+      /access denied|attention required|just a moment|checking your browser|robot check|blocked|pardon our interruption|please verify|security check|one more step/i;
+    const blockedBodyPatterns =
+      /captcha|cf-browser-verification|challenge-platform|akamai|perimeterx|datadome|cloudflare|enable javascript and cookies|unusual traffic/i;
+
+    const looksBlocked =
+      httpStatus === 403 ||
+      httpStatus === 503 ||
+      blockedTitlePatterns.test(pageTitle) ||
+      (blockedBodyPatterns.test(bodyText) && bodyText.length < 5000);
+
+    if (looksBlocked) {
+      throw new ScanBlockedError(
+        "This site's firewall blocked our scanner. The results would not reflect the real page.",
+        pageTitle,
+        httpStatus,
+      );
+    }
+
+    // ---- Mobile context (only created after WAF check passes) ----------------
+    const mobileContext = await browser.newContext({
+      ignoreHTTPSErrors: true,
+      viewport: MOBILE_CONFIG.viewport,
+      colorScheme: "light",
+      userAgent: MOBILE_CONFIG.userAgent,
+      isMobile: MOBILE_CONFIG.isMobile,
+      hasTouch: MOBILE_CONFIG.hasTouch,
+      deviceScaleFactor: MOBILE_CONFIG.deviceScaleFactor,
+      extraHTTPHeaders: { ...MOBILE_CONFIG.extraHTTPHeaders },
+    });
+    const mobilePage = await mobileContext.newPage();
+    await mobilePage.addInitScript(STEALTH_INIT_SCRIPT);
+
+    await navigateAndWait(mobilePage, effectiveUrl, isRemoteBrowser);
+
+    // ---- Parallel: axe scan + screenshot on both viewports -------------------
+    const axeSource = await getAxeCoreSource();
+
+    type ScreenshotResult = { screenshot?: Buffer; screenshotWarning?: string };
+    const emptyShot: ScreenshotResult = {};
+
+    const [desktopScan, mobileScan, desktopShot, mobileShot] = await Promise.all([
+      runAxeOnPage(desktopPage, axeSource),
+      runAxeOnPage(mobilePage, axeSource),
+      options.captureScreenshot
+        ? capturePageScreenshot(desktopPage, DESKTOP_CONFIG.viewport.width)
+        : Promise.resolve(emptyShot),
+      options.captureScreenshot
+        ? capturePageScreenshot(mobilePage, MOBILE_CONFIG.viewport.width)
+        : Promise.resolve(emptyShot),
+    ]);
+
+    const dockerWarning = urlRewritten
+      ? "URL rewritten from localhost to host.docker.internal for Docker-based browser."
+      : undefined;
+
+    const desktopWarnings = [desktopScan.warning, dockerWarning].filter(Boolean).join(" ");
+    const mobileWarnings = [mobileScan.warning, dockerWarning].filter(Boolean).join(" ");
+
+    return {
+      desktop: {
+        ...desktopScan,
+        ...(desktopShot.screenshot && { screenshot: desktopShot.screenshot }),
+        ...(desktopShot.screenshotWarning && { screenshotWarning: desktopShot.screenshotWarning }),
+        ...(desktopWarnings && { warning: desktopWarnings }),
+      },
+      mobile: {
+        ...mobileScan,
+        ...(mobileShot.screenshot && { screenshot: mobileShot.screenshot }),
+        ...(mobileShot.screenshotWarning && { screenshotWarning: mobileShot.screenshotWarning }),
+        ...(mobileWarnings && { warning: mobileWarnings }),
+      },
+      pageTitle,
       ...(platform && { platform }),
     };
   } finally {

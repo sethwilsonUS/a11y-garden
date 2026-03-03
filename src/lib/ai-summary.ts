@@ -6,6 +6,7 @@
  */
 
 import OpenAI from "openai";
+import { PLATFORM_LABELS, getPlatformConfidence } from "./platforms";
 
 export interface AISummaryResult {
   summary: string;
@@ -96,22 +97,15 @@ export async function generateAISummary(
   const systemPrompt = `You are an accessibility expert translating technical WCAG violations into plain English for web developers and site owners. Focus on user impact and actionable fixes. Be concise and helpful.`;
 
   // Platform-specific context for more actionable advice
-  const platformLabels: Record<string, string> = {
-    wordpress: "WordPress",
-    squarespace: "Squarespace",
-    shopify: "Shopify",
-    wix: "Wix",
-    webflow: "Webflow",
-    drupal: "Drupal",
-    joomla: "Joomla",
-    ghost: "Ghost",
-    hubspot: "HubSpot",
-    weebly: "Weebly",
-  };
-  const platformName = platform ? platformLabels[platform] ?? platform : null;
+  const platformName = platform ? (PLATFORM_LABELS[platform] ?? platform) : null;
+  const isMediumConfidence = platform ? getPlatformConfidence(platform) === "medium" : false;
+
+  const confidenceHedge = isMediumConfidence
+    ? ` (Note: the site appears to use ${platformName} based on HTML markers, but we're not 100% certain — frame your advice accordingly.)`
+    : "";
 
   const platformInstruction = platformName
-    ? `\n3. A "platformTip" — a concise paragraph (2-4 sentences) with actionable, ${platformName}-specific guidance for fixing the violations above. Reference specific ${platformName} features, settings, plugins, or tools the site owner can use. Do NOT repeat the general summary — focus only on platform-specific how-to-fix advice.`
+    ? `\n3. A "platformTip" — a concise paragraph (2-4 sentences) with actionable, ${platformName}-specific guidance for fixing the violations above. Reference specific ${platformName} features, settings, plugins, or tools the site owner can use. Do NOT repeat the general summary — focus only on platform-specific how-to-fix advice.${confidenceHedge}`
     : "";
 
   const platformJsonField = platformName

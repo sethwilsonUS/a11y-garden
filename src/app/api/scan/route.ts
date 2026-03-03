@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { calculateGrade, GRADING_VERSION } from "@/lib/grading";
+import { calculateGrade, calculateCombinedGrade, GRADING_VERSION } from "@/lib/grading";
 import {
   checkRateLimit,
   acquireConcurrencySlot,
   releaseConcurrencySlot,
 } from "@/lib/rate-limit";
 import { validateUrl } from "@/lib/url-validator";
-import { scanUrl, ScanBlockedError } from "@/lib/scanner";
+import { scanUrlDual, ScanBlockedError } from "@/lib/scanner";
 
 // Vercel Pro allows up to 60s for serverless functions
 export const maxDuration = 60;
@@ -101,40 +101,57 @@ export async function POST(request: NextRequest) {
         browserWSEndpoint = `wss://chrome.browserless.io?token=${browserlessToken}`;
       }
 
-      // ---- Run the scan -----------------------------------------------------
-      const scanResult = await scanUrl(validation.url, {
+      // ---- Run dual-viewport scan --------------------------------------------
+      const dualResult = await scanUrlDual(validation.url, {
         browserWSEndpoint,
         captureScreenshot: true,
       });
 
-      // ---- Calculate grade --------------------------------------------------
-      const { score, grade } = calculateGrade(scanResult.violations);
+      // ---- Calculate grades -------------------------------------------------
+      const desktopGrade = calculateGrade(dualResult.desktop.violations);
+      const mobileGrade = calculateGrade(dualResult.mobile.violations);
+      const combined = calculateCombinedGrade(desktopGrade.score, mobileGrade.score);
 
-      // Return results with grading version for lazy recalc tracking
       return NextResponse.json({
-        violations: scanResult.violations,
-        letterGrade: grade,
-        score,
         gradingVersion: GRADING_VERSION,
-        rawViolations: scanResult.rawViolations,
-        // Indicate if we used safe mode (fell back to curated safe rules)
-        safeMode: scanResult.safeMode,
-        // Flag when node details were trimmed to fit the size cap
-        ...(scanResult.truncated && { truncated: true }),
-        // Include page title if we got one
-        ...(scanResult.pageTitle && { pageTitle: scanResult.pageTitle }),
-        // Include warning if site was too complex for full scan
-        ...(scanResult.warning && { warning: scanResult.warning }),
-        // Include base64-encoded JPEG screenshot for client-side upload to Convex
-        ...(scanResult.screenshot && {
-          screenshotBase64: scanResult.screenshot.toString("base64"),
-        }),
-        // Include screenshot warning (e.g. "appears blank") so the client can display it
-        ...(scanResult.screenshotWarning && {
-          screenshotWarning: scanResult.screenshotWarning,
-        }),
-        // Include detected platform/CMS (e.g. "wordpress", "squarespace")
-        ...(scanResult.platform && { platform: scanResult.platform }),
+        ...(dualResult.pageTitle && { pageTitle: dualResult.pageTitle }),
+        ...(dualResult.platform && { platform: dualResult.platform }),
+
+        // Combined weighted grade (60% desktop, 40% mobile)
+        letterGrade: combined.grade,
+        score: combined.score,
+
+        desktop: {
+          violations: dualResult.desktop.violations,
+          letterGrade: desktopGrade.grade,
+          score: desktopGrade.score,
+          rawViolations: dualResult.desktop.rawViolations,
+          safeMode: dualResult.desktop.safeMode,
+          ...(dualResult.desktop.truncated && { truncated: true }),
+          ...(dualResult.desktop.warning && { warning: dualResult.desktop.warning }),
+          ...(dualResult.desktop.screenshot && {
+            screenshotBase64: dualResult.desktop.screenshot.toString("base64"),
+          }),
+          ...(dualResult.desktop.screenshotWarning && {
+            screenshotWarning: dualResult.desktop.screenshotWarning,
+          }),
+        },
+
+        mobile: {
+          violations: dualResult.mobile.violations,
+          letterGrade: mobileGrade.grade,
+          score: mobileGrade.score,
+          rawViolations: dualResult.mobile.rawViolations,
+          safeMode: dualResult.mobile.safeMode,
+          ...(dualResult.mobile.truncated && { truncated: true }),
+          ...(dualResult.mobile.warning && { warning: dualResult.mobile.warning }),
+          ...(dualResult.mobile.screenshot && {
+            screenshotBase64: dualResult.mobile.screenshot.toString("base64"),
+          }),
+          ...(dualResult.mobile.screenshotWarning && {
+            screenshotWarning: dualResult.mobile.screenshotWarning,
+          }),
+        },
       });
     } finally {
       // Always release the concurrency slot, even on error
