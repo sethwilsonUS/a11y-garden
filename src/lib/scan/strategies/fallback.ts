@@ -31,6 +31,7 @@ export class FallbackStrategy implements ScanStrategy {
   private baas = new PlaywrightBaaSStrategy();
   private bql: BqlJsdomStrategy | null = null;
   private wafBlockedUrls = new Set<string>();
+  private baasDisabled = false;
 
   private async getBql(): Promise<BqlJsdomStrategy> {
     if (!this.bql) {
@@ -46,9 +47,9 @@ export class FallbackStrategy implements ScanStrategy {
   ): Promise<StrategyScanResult> {
     const startTime = Date.now();
     const deadline = startTime + opts.timeBudgetMs;
-    const skipBaas = this.wafBlockedUrls.has(url);
+    const skipBaas = this.baasDisabled || this.wafBlockedUrls.has(url);
 
-    // Step 1: Try BaaS (fast, full accuracy) — skip if we already know this URL is WAF-blocked
+    // Step 1: Try BaaS (fast, full accuracy) — skip if BaaS is broken or URL is WAF-blocked
     if (!skipBaas) {
       try {
         const baasTimeout = Math.min(BAAS_TIMEOUT_MS, opts.timeBudgetMs);
@@ -79,6 +80,9 @@ export class FallbackStrategy implements ScanStrategy {
         const msg = err instanceof Error ? err.message : String(err);
 
         this.wafBlockedUrls.add(url);
+        if (!isScanBlocked) {
+          this.baasDisabled = true;
+        }
 
         scanLog.bqlEscalation(
           url,
