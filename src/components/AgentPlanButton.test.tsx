@@ -32,6 +32,7 @@ function makeAuditProps(overrides: Record<string, unknown> = {}) {
     mobileTotalViolations: 3,
     agentPlanFileId: undefined as string | undefined,
     domain: "example.com",
+    isOwner: true,
     ...overrides,
   };
 }
@@ -92,6 +93,13 @@ describe("AgentPlanButton", () => {
       expect(container.innerHTML).toBe("");
     });
 
+    it("does not render when isOwner is false", () => {
+      const { container } = render(
+        <AgentPlanButton {...makeAuditProps({ isOwner: false })} />,
+      );
+      expect(container.innerHTML).toBe("");
+    });
+
     it("renders when platform is a dev framework and has violations", () => {
       render(<AgentPlanButton {...makeAuditProps()} />);
       expect(screen.getByRole("button")).toBeInTheDocument();
@@ -112,13 +120,13 @@ describe("AgentPlanButton", () => {
       expect(screen.getByText("Generate AI Fix Plan")).toBeInTheDocument();
     });
 
-    it("renders 'View Fix Plan' and 'Download ZIP' when agentPlanFileId is present", () => {
+    it("renders 'View AI Fix Plan' and 'Download ZIP' when agentPlanFileId is present", () => {
       render(
         <AgentPlanButton
           {...makeAuditProps({ agentPlanFileId: "storage-abc" })}
         />,
       );
-      expect(screen.getByText("View Fix Plan")).toBeInTheDocument();
+      expect(screen.getByText("View AI Fix Plan")).toBeInTheDocument();
       expect(screen.getByText("Download ZIP")).toBeInTheDocument();
     });
   });

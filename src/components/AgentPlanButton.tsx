@@ -44,20 +44,28 @@ function AgentPlanButtonInner({
 
   const agentPlanUrl = useQuery(api.audits.getAgentPlanUrl, { auditId });
   const generateAgentPlan = useAction(api.agentPlan.generateAgentPlan);
+  const [prevFileId, setPrevFileId] = useState(agentPlanFileId);
 
-  useEffect(() => {
+  // React-recommended pattern: adjust state during render when a prop changes
+  // https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  if (agentPlanFileId !== prevFileId) {
+    setPrevFileId(agentPlanFileId);
     if (agentPlanFileId) {
-      if (graceTimeoutRef.current) {
-        clearTimeout(graceTimeoutRef.current);
-        graceTimeoutRef.current = null;
-      }
       if (isGenerating) {
         setIsGenerating(false);
         setViewerOpen(true);
       }
       setErrorMessage(null);
     }
-  }, [isGenerating, agentPlanFileId]);
+  }
+
+  // Clean up grace timeout when plan arrives
+  useEffect(() => {
+    if (agentPlanFileId && graceTimeoutRef.current) {
+      clearTimeout(graceTimeoutRef.current);
+      graceTimeoutRef.current = null;
+    }
+  }, [agentPlanFileId]);
 
   // Visibility gate — must come after all hooks
   if (

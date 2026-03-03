@@ -186,9 +186,19 @@ export function AgentPlanViewer({
 }: AgentPlanViewerProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [markdown, setMarkdown] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [prevUrl, setPrevUrl] = useState(agentPlanUrl);
+  const fetchingRef = useRef(false);
+
+  // Reset when URL changes (regeneration)
+  if (agentPlanUrl !== prevUrl) {
+    setPrevUrl(agentPlanUrl);
+    setMarkdown(null);
+    setError(null);
+  }
+
+  const loading = open && !!agentPlanUrl && !markdown && !error;
 
   useEffect(() => {
     const el = dialogRef.current;
@@ -201,12 +211,10 @@ export function AgentPlanViewer({
   }, [open]);
 
   useEffect(() => {
-    if (!open || !agentPlanUrl) return;
-    if (markdown) return; // already loaded
+    if (!open || !agentPlanUrl || markdown || fetchingRef.current) return;
 
     let cancelled = false;
-    setLoading(true);
-    setError(null);
+    fetchingRef.current = true;
 
     fetch(agentPlanUrl)
       .then((r) => {
@@ -216,25 +224,22 @@ export function AgentPlanViewer({
       .then((text) => {
         if (!cancelled) {
           setMarkdown(stripWrappingCodeFence(text));
-          setLoading(false);
         }
       })
       .catch((err) => {
         if (!cancelled) {
           setError(err.message ?? "Failed to load fix plan");
-          setLoading(false);
         }
+      })
+      .finally(() => {
+        if (!cancelled) fetchingRef.current = false;
       });
 
     return () => {
       cancelled = true;
+      fetchingRef.current = false;
     };
   }, [open, agentPlanUrl, markdown]);
-
-  // Reset when URL changes (regeneration)
-  useEffect(() => {
-    setMarkdown(null);
-  }, [agentPlanUrl]);
 
   const handleCopy = useCallback(async () => {
     if (!markdown) return;
