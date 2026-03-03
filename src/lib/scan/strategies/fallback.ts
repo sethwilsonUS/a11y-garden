@@ -75,23 +75,15 @@ export class FallbackStrategy implements ScanStrategy {
         };
         return result;
       } catch (err) {
-        if (!(err instanceof ScanBlockedError) && !(err instanceof Error)) {
-          throw err;
-        }
         const isScanBlocked = err instanceof ScanBlockedError;
-        const isTimeout =
-          err instanceof Error && err.message.includes("timed out");
-
-        if (!isScanBlocked && !isTimeout) {
-          throw err;
-        }
+        const msg = err instanceof Error ? err.message : String(err);
 
         this.wafBlockedUrls.add(url);
 
         scanLog.bqlEscalation(
           url,
           "baas_failed",
-          isScanBlocked ? "WAF blocked" : "timed out",
+          isScanBlocked ? "WAF blocked" : msg,
         );
       }
     } else {
