@@ -367,7 +367,9 @@ The app is designed to degrade gracefully rather than crash:
 │   │       ├── scan/          # Scan API (dual-viewport via scanUrlDual)
 │   │       └── ai-summary/    # AI summary API (local mode + demo)
 │   ├── components/
-│   │   ├── AgentPlanButton.tsx     # Generate/download AGENTS.md fix plans
+│   │   ├── AgentPlanButton.tsx     # Generate/view AGENTS.md fix plans (owner-only)
+│   │   ├── AgentPlanViewer.tsx    # Modal viewer for rendered fix plan markdown
+│   │   ├── ButtonCard.tsx         # Shared wrapper for action buttons
 │   │   ├── ErrorBoundary.tsx      # Global React error boundary
 │   │   ├── ScanForm.tsx           # URL input + dual-viewport orchestration
 │   │   ├── ScreenshotSection.tsx  # Screenshot viewer (desktop or mobile)
@@ -382,6 +384,7 @@ The app is designed to degrade gracefully rather than crash:
 │       ├── mode.ts           # Local vs. web mode detection
 │       ├── ai-summary.ts     # OpenAI integration (CLI + local mode)
 │       ├── grading.ts        # Client-side grading (re-exports Convex)
+│       ├── create-agent-plan-zip.ts # Client-side ZIP bundler for fix plans
 │       ├── rate-limit.ts     # Upstash rate limiting & concurrency
 │       └── url-validator.ts  # SSRF-safe URL validation
 └── middleware.ts             # Clerk auth middleware
@@ -446,7 +449,7 @@ The app is designed to degrade gracefully rather than crash:
 9. **Platform detected** — CMS platforms (WordPress, Shopify, etc.) and frameworks (Next.js, React, Angular, etc.) are identified from HTML markers, with confidence levels (high/medium)
 10. **Audit saved** — Scan results for both viewports are stored in Convex. Desktop and mobile screenshots are uploaded in parallel to file storage.
 11. **Grades calculated** — Per-viewport grades (A-F) plus a combined weighted grade (60% desktop + 40% mobile)
-12. **AI analyzes** — OpenAI generates separate summaries for desktop and mobile violations, plus platform-specific tips (fires in the background)
+12. **AI analyzes** — OpenAI generates separate summaries for desktop and mobile violations, plus platform-specific tips (fires in the background). If violations are identical to the previous audit for the same URL, the AI summary and any existing agent plan are reused without calling OpenAI.
 13. **Results displayed** — A tabbed UI shows Desktop and Mobile results separately. Each tab has its own grade, violations, screenshot, AI summary, and top issues. The combined grade appears in the header.
 
 ---
