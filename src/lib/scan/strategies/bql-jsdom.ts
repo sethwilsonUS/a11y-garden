@@ -84,11 +84,13 @@ const ESCALATION_CHAIN: EscalationStep[] = [
 const MAX_RETRIES = 2;
 const INITIAL_BACKOFF_MS = 1_000;
 
+const DEFAULT_BQL_TIMEOUT_MS = 20_000;
+
 async function callBql(
   query: string,
   token: string,
   cloudUrl: string,
-  opts: { proxy: boolean; humanlike: boolean },
+  opts: { proxy: boolean; humanlike: boolean; timeoutMs?: number },
 ): Promise<BqlResponse> {
   const params = new URLSearchParams({ token });
   if (opts.proxy) {
@@ -100,12 +102,14 @@ async function callBql(
   }
 
   const endpoint = `${cloudUrl}/stealth/bql?${params}`;
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_BQL_TIMEOUT_MS;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     const res = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ query, variables: {} }),
+      signal: AbortSignal.timeout(timeoutMs),
     });
 
     if (res.ok) {
@@ -180,7 +184,7 @@ function buildBqlQuery(
   if (step.postGoto === "wait-nav") {
     return `mutation GetHtml {${preNav}
   goto(url: "${targetUrl}", waitUntil: load) { status time }
-  waitForNavigation(timeout: 20000, waitUntil: networkIdle) { time }${desktopScreenshotLine}
+  waitForNavigation(timeout: 8000, waitUntil: networkIdle) { time }${desktopScreenshotLine}
   html { html }${mobileScreenshotLine}${singleScreenshotLine}
 }`;
   }
@@ -188,21 +192,21 @@ function buildBqlQuery(
   if (step.postGoto === "wait-selector") {
     return `mutation GetHtml {${preNav}
   goto(url: "${targetUrl}", waitUntil: load) { status time }
-  waitForSelector(selector: "main, #root, [data-testid], article, [role=main]", timeout: 15000, visible: true) { time }${desktopScreenshotLine}
+  waitForSelector(selector: "main, #root, [data-testid], article, [role=main]", timeout: 8000, visible: true) { time }${desktopScreenshotLine}
   html { html }${mobileScreenshotLine}${singleScreenshotLine}
 }`;
   }
 
   if (step.verify) {
     return `mutation GetHtml {${preNav}
-  goto(url: "${targetUrl}", waitUntil: networkIdle) { status time }
+  goto(url: "${targetUrl}", waitUntil: domContentLoaded) { status time }
   verify(type: cloudflare) { found solved time }${desktopScreenshotLine}
   html { html }${mobileScreenshotLine}${singleScreenshotLine}
 }`;
   }
 
   return `mutation GetHtml {${preNav}
-  goto(url: "${targetUrl}", waitUntil: networkIdle) { status time }${desktopScreenshotLine}
+  goto(url: "${targetUrl}", waitUntil: domContentLoaded) { status time }${desktopScreenshotLine}
   html { html }${mobileScreenshotLine}${singleScreenshotLine}
 }`;
 }
@@ -213,6 +217,7 @@ async function bqlGetHtml(
   token: string,
   cloudUrl: string,
   queryOpts: BqlQueryOptions = {},
+  stepTimeoutMs?: number,
 ): Promise<BqlNavigateResult> {
   let query = buildBqlQuery(targetUrl, step, queryOpts);
   let data: BqlResponse;
@@ -221,6 +226,7 @@ async function bqlGetHtml(
     data = await callBql(query, token, cloudUrl, {
       proxy: step.proxy,
       humanlike: step.humanlike,
+      timeoutMs: stepTimeoutMs,
     });
   } catch (err) {
     if (step.verify) {
@@ -228,6 +234,7 @@ async function bqlGetHtml(
       data = await callBql(query, token, cloudUrl, {
         proxy: step.proxy,
         humanlike: step.humanlike,
+        timeoutMs: stepTimeoutMs,
       });
     } else {
       throw err;
@@ -426,14 +433,21 @@ export class BqlJsdomStrategy implements ScanStrategy {
         );
       }
 
+      const stepsLeft = ESCALATION_CHAIN.length - i;
+      const stepTimeout = Math.min(
+        Math.floor((remaining - 3_000) / stepsLeft),
+        DEFAULT_BQL_TIMEOUT_MS,
+      );
+
       try {
-        console.log(`[BQL] ${step.label} → ${url}`);
+        console.log(`[BQL] ${step.label} → ${url} (${Math.round(stepTimeout / 1000)}s budget)`);
         const nav = await bqlGetHtml(
           url,
           step,
           this.token,
           this.cloudUrl,
           queryOpts,
+          stepTimeout,
         );
 
         const wafCheck = checkBqlNavigation(
@@ -448,7 +462,7 @@ export class BqlJsdomStrategy implements ScanStrategy {
             console.log(
               `[BQL] WAF detected (${wafCheck.type}) — escalating to ${nextStep.label}`,
             );
-            await new Promise((r) => setTimeout(r, 1_000));
+            await new Promise((r) => setTimeout(r, 500));
             continue;
           }
           throw new ScanBlockedError(
@@ -473,7 +487,7 @@ export class BqlJsdomStrategy implements ScanStrategy {
           console.log(
             `[BQL] ${step.label} failed: ${msg} — escalating to ${nextStep.label}`,
           );
-          await new Promise((r) => setTimeout(r, 1_000));
+          await new Promise((r) => setTimeout(r, 500));
           continue;
         }
         throw err;

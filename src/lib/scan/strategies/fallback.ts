@@ -21,7 +21,7 @@ import type {
   ScanMetadata,
 } from "./types";
 
-const BAAS_TIMEOUT_MS = 15_000;
+const BAAS_TIMEOUT_MS = 10_000;
 const MIN_REMAINING_FOR_BQL_MS = 10_000;
 const RESPONSE_BUFFER_MS = 5_000;
 
