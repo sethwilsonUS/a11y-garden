@@ -55,14 +55,7 @@ interface EscalationStep {
 
 const ESCALATION_CHAIN: EscalationStep[] = [
   {
-    label: "stealth",
-    verify: true,
-    proxy: false,
-    humanlike: false,
-    postGoto: "immediate",
-  },
-  {
-    label: "stealth + proxy + waitForNav",
+    label: "stealth + proxy",
     verify: false,
     proxy: true,
     humanlike: true,
