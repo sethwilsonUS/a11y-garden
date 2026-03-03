@@ -238,9 +238,36 @@ export const updateAuditWithResults = mutation({
     const { auditId, ...updates } = args;
     await ctx.db.patch(auditId, {
       ...updates,
-      // Clear any previous error message on successful update
       errorMessage: undefined,
     });
+
+    // Reuse agent plan from a previous audit if violations are identical
+    const audit = await ctx.db.get(auditId);
+    if (audit && args.status === "complete") {
+      const previous = await ctx.db
+        .query("audits")
+        .withIndex("by_url", (q) => q.eq("url", audit.url))
+        .filter((q) =>
+          q.and(
+            q.neq(q.field("_id"), auditId),
+            q.eq(q.field("status"), "complete"),
+            q.neq(q.field("agentPlanFileId"), undefined),
+          ),
+        )
+        .order("desc")
+        .first();
+
+      if (
+        previous?.agentPlanFileId &&
+        previous.rawViolations === args.rawViolations &&
+        (previous.mobileRawViolations ?? null) === (args.mobileRawViolations ?? null)
+      ) {
+        await ctx.db.patch(auditId, {
+          agentPlanFileId: previous.agentPlanFileId,
+          agentPlanGeneratedAt: previous.agentPlanGeneratedAt,
+        });
+      }
+    }
   },
 });
 
