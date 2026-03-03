@@ -15,6 +15,7 @@
  */
 
 import { ScanBlockedError } from "@/lib/scanner";
+import { detectPlatformFromHtml } from "@/lib/platforms";
 import { runAxeOnHtml } from "../axe-jsdom";
 import { STRUCTURAL_RULES, JSDOM_SKIPPED_CATEGORIES } from "../rules/categories";
 import { checkBqlNavigation } from "../utils/waf-detector";
@@ -336,6 +337,8 @@ export class BqlJsdomStrategy implements ScanStrategy {
       ? Buffer.from(fetchResult.mobileScreenshotBase64, "base64")
       : undefined;
 
+    const platform = detectPlatformFromHtml(fetchResult.content);
+
     const result: StrategyScanResult = {
       violations: axeResult.violations,
       rawViolations: axeResult.rawViolations,
@@ -343,6 +346,7 @@ export class BqlJsdomStrategy implements ScanStrategy {
       scanMode: buildJsdomScanMode(axeResult.rulesRun),
       pageTitle: fetchResult.pageTitle,
       screenshot,
+      platform,
       warning:
         axeResult.violations.total === 0 && fetchResult.content.length < 10_000
           ? "Limited results — this site may render content via JavaScript. " +
