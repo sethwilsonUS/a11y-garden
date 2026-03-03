@@ -30,6 +30,7 @@ export class FallbackStrategy implements ScanStrategy {
 
   private baas = new PlaywrightBaaSStrategy();
   private bql: BqlJsdomStrategy | null = null;
+  private wafBlockedUrls = new Set<string>();
 
   private async getBql(): Promise<BqlJsdomStrategy> {
     if (!this.bql) {
@@ -45,49 +46,56 @@ export class FallbackStrategy implements ScanStrategy {
   ): Promise<StrategyScanResult> {
     const startTime = Date.now();
     const deadline = startTime + opts.timeBudgetMs;
+    const skipBaas = this.wafBlockedUrls.has(url);
 
-    // Step 1: Try BaaS (fast, full accuracy)
-    try {
-      const baasTimeout = Math.min(BAAS_TIMEOUT_MS, opts.timeBudgetMs);
-      const result = await Promise.race([
-        this.baas.scan(url, {
-          ...opts,
-          timeBudgetMs: baasTimeout,
-        }),
-        new Promise<never>((_, reject) =>
-          setTimeout(
-            () => reject(new Error("BaaS attempt timed out")),
-            baasTimeout,
+    // Step 1: Try BaaS (fast, full accuracy) — skip if we already know this URL is WAF-blocked
+    if (!skipBaas) {
+      try {
+        const baasTimeout = Math.min(BAAS_TIMEOUT_MS, opts.timeBudgetMs);
+        const result = await Promise.race([
+          this.baas.scan(url, {
+            ...opts,
+            timeBudgetMs: baasTimeout,
+          }),
+          new Promise<never>((_, reject) =>
+            setTimeout(
+              () => reject(new Error("BaaS attempt timed out")),
+              baasTimeout,
+            ),
           ),
-        ),
-      ]);
+        ]);
 
-      usageTracker.record("baas");
-      result.metadata = {
-        scanStrategy: "baas",
-        wafDetected: false,
-        wafType: null,
-        wafBypassed: false,
-        scanDurationMs: Date.now() - startTime,
-      };
-      return result;
-    } catch (err) {
-      if (!(err instanceof ScanBlockedError) && !(err instanceof Error)) {
-        throw err;
+        usageTracker.record("baas");
+        result.metadata = {
+          scanStrategy: "baas",
+          wafDetected: false,
+          wafType: null,
+          wafBypassed: false,
+          scanDurationMs: Date.now() - startTime,
+        };
+        return result;
+      } catch (err) {
+        if (!(err instanceof ScanBlockedError) && !(err instanceof Error)) {
+          throw err;
+        }
+        const isScanBlocked = err instanceof ScanBlockedError;
+        const isTimeout =
+          err instanceof Error && err.message.includes("timed out");
+
+        if (!isScanBlocked && !isTimeout) {
+          throw err;
+        }
+
+        this.wafBlockedUrls.add(url);
+
+        scanLog.bqlEscalation(
+          url,
+          "baas_failed",
+          isScanBlocked ? "WAF blocked" : "timed out",
+        );
       }
-      const isScanBlocked = err instanceof ScanBlockedError;
-      const isTimeout =
-        err instanceof Error && err.message.includes("timed out");
-
-      if (!isScanBlocked && !isTimeout) {
-        throw err;
-      }
-
-      scanLog.bqlEscalation(
-        url,
-        "baas_failed",
-        isScanBlocked ? "WAF blocked" : "timed out",
-      );
+    } else {
+      scanLog.bqlEscalation(url, "baas_skipped", "URL already known WAF-blocked");
     }
 
     // Step 2: Auth gate — BQL burns cloud units, require sign-in

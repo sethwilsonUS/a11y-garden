@@ -1,12 +1,61 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { useMutation, useAction } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { useRouter } from "next/navigation";
 import { Id } from "../../convex/_generated/dataModel";
 import { buildResultsUrl } from "@/lib/urls";
 import { track } from "@/lib/analytics";
+
+const SCAN_PROGRESS_STEPS: [number, string][] = [
+  [0, "Checking rate limits…"],
+  [1_000, "Validating URL…"],
+  [2_000, "Checking robots.txt…"],
+  [3_000, "Connecting to browser…"],
+  [5_000, "Loading page (desktop)…"],
+  [10_000, "Running accessibility scan (desktop)…"],
+  [15_000, "Capturing screenshot (desktop)…"],
+  [18_000, "Loading page (mobile)…"],
+  [22_000, "Running accessibility scan (mobile)…"],
+  [26_000, "Capturing screenshot (mobile)…"],
+  [32_000, "Still working — complex sites take longer…"],
+  [42_000, "Almost there — finalizing scan…"],
+  [52_000, "Wrapping up — this site is taking a while…"],
+];
+
+function useScanProgress() {
+  const [status, setStatus] = useState("");
+  const timerRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const manualRef = useRef(false);
+
+  const startProgress = useCallback(() => {
+    manualRef.current = false;
+    for (const [delay, message] of SCAN_PROGRESS_STEPS) {
+      timerRef.current.push(
+        setTimeout(() => {
+          if (!manualRef.current) setStatus(message);
+        }, delay),
+      );
+    }
+  }, []);
+
+  const setManualStatus = useCallback((msg: string) => {
+    manualRef.current = true;
+    setStatus(msg);
+  }, []);
+
+  const stopProgress = useCallback(() => {
+    for (const t of timerRef.current) clearTimeout(t);
+    timerRef.current = [];
+    manualRef.current = false;
+    setStatus("");
+  }, []);
+
+  useEffect(() => stopProgress, [stopProgress]);
+
+  return { status, startProgress, setManualStatus, stopProgress };
+}
 
 export function ScanForm() {
   const [url, setUrl] = useState("");
@@ -17,7 +66,7 @@ export function ScanForm() {
     retryAfter?: number;
   } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [scanStatus, setScanStatus] = useState("");
+  const { status: scanStatus, startProgress, setManualStatus: setScanStatus, stopProgress } = useScanProgress();
   const createAudit = useMutation(api.audits.createAudit);
   const updateAuditStatus = useMutation(api.audits.updateAuditStatus);
   const updateAuditWithResults = useMutation(api.audits.updateAuditWithResults);
@@ -31,7 +80,7 @@ export function ScanForm() {
     setError("");
     setRateLimitInfo(null);
     setIsSubmitting(true);
-    setScanStatus("Creating audit...");
+    startProgress();
 
     // Validate and normalize URL
     let normalizedUrl = url.trim();
@@ -53,7 +102,7 @@ export function ScanForm() {
     } catch {
       setError("Please enter a valid URL");
       setIsSubmitting(false);
-      setScanStatus("");
+      stopProgress();
       return;
     }
 
@@ -87,7 +136,6 @@ export function ScanForm() {
     try {
       // Step 1: Call the scan API first so rate-limit / capacity rejections
       //         happen before we create an audit row in Convex.
-      setScanStatus("Scanning website...");
       const response = await fetch("/api/scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -105,7 +153,7 @@ export function ScanForm() {
           retryAfter: retryAfter ? Number(retryAfter) : undefined,
         });
         setIsSubmitting(false);
-        setScanStatus("");
+        stopProgress();
         return;
       }
 
@@ -119,7 +167,7 @@ export function ScanForm() {
             : "This site's firewall blocked our automated scanner, so we can't produce accurate results. Try a different URL.",
         });
         setIsSubmitting(false);
-        setScanStatus("");
+        stopProgress();
         return;
       }
 
@@ -234,7 +282,7 @@ export function ScanForm() {
       }
 
       setIsSubmitting(false);
-      setScanStatus("");
+      stopProgress();
     }
   };
 
