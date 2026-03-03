@@ -4,8 +4,8 @@ export const dynamic = "force-dynamic";
 
 interface HealthStatus {
   status: "ok" | "degraded" | "down";
-  baas: { reachable: boolean; latencyMs?: number; error?: string };
-  bql: { reachable: boolean; latencyMs?: number; error?: string };
+  baas: { reachable: boolean; latencyMs?: number; error?: string; endpoint?: string };
+  bql: { reachable: boolean; latencyMs?: number; error?: string; endpoint?: string };
   config: {
     hasToken: boolean;
     hasUrl: boolean;
@@ -25,21 +25,28 @@ async function checkBaas(): Promise<HealthStatus["baas"]> {
     .replace(/^wss:/, "https:")
     .replace(/^ws:/, "http:");
 
+  const parsed = new URL(baseHttp);
+  const hasCustomPath = parsed.pathname !== "/";
+  const httpBase = hasCustomPath ? baseHttp : `${baseHttp}/chromium/playwright`;
+
   const start = Date.now();
   try {
     const res = await fetch(
-      `${baseHttp}/config?token=${token}`,
-      { signal: AbortSignal.timeout(5_000) },
+      `${httpBase}?token=${token}`,
+      { method: "HEAD", signal: AbortSignal.timeout(5_000) },
     );
+    const reachable = res.status !== 404;
     return {
-      reachable: res.ok,
+      reachable,
       latencyMs: Date.now() - start,
-      ...(res.ok ? {} : { error: `HTTP ${res.status}` }),
+      endpoint: httpBase,
+      ...(reachable ? {} : { error: `HTTP ${res.status}` }),
     };
   } catch (err) {
     return {
       reachable: false,
       latencyMs: Date.now() - start,
+      endpoint: httpBase,
       error: err instanceof Error ? err.message : "Unknown error",
     };
   }
@@ -52,26 +59,30 @@ async function checkBql(): Promise<HealthStatus["bql"]> {
     "https://production-sfo.browserless.io";
   if (!token) return { reachable: false, error: "BROWSERLESS_TOKEN not set" };
 
+  const endpoint = `${cloudUrl}/chromium/bql?token=${token}`;
   const start = Date.now();
   try {
-    const res = await fetch(`${cloudUrl}/stealth/bql?token=${token}`, {
+    const res = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        query: 'mutation Ping { goto(url: "about:blank") { status } }',
+        query: 'mutation Ping { goto(url: "about:blank", waitUntil: domContentLoaded) { status } }',
         variables: {},
       }),
-      signal: AbortSignal.timeout(10_000),
+      signal: AbortSignal.timeout(15_000),
     });
+    const reachable = res.ok || res.status === 400;
     return {
-      reachable: res.ok || res.status === 400,
+      reachable,
       latencyMs: Date.now() - start,
-      ...(!res.ok && res.status !== 400 ? { error: `HTTP ${res.status}` } : {}),
+      endpoint: `${cloudUrl}/chromium/bql`,
+      ...(!reachable ? { error: `HTTP ${res.status}` } : {}),
     };
   } catch (err) {
     return {
       reachable: false,
       latencyMs: Date.now() - start,
+      endpoint: `${cloudUrl}/chromium/bql`,
       error: err instanceof Error ? err.message : "Unknown error",
     };
   }
