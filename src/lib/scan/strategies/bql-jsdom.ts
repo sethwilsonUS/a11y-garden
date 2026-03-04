@@ -44,7 +44,7 @@ interface BqlNavigateResult {
   mobileScreenshotBase64: string | null;
 }
 
-type PostGotoStrategy = "immediate" | "wait-nav" | "wait-selector";
+type PostGotoStrategy = "immediate" | "wait-nav" | "wait-nav-long";
 
 interface EscalationStep {
   label: string;
@@ -63,11 +63,11 @@ const ESCALATION_CHAIN: EscalationStep[] = [
     postGoto: "wait-nav",
   },
   {
-    label: "stealth + proxy + waitForSelector",
+    label: "stealth + proxy + extended wait",
     verify: false,
     proxy: true,
     humanlike: true,
-    postGoto: "wait-selector",
+    postGoto: "wait-nav-long",
   },
 ];
 
@@ -153,6 +153,7 @@ function buildBqlQuery(
   targetUrl: string,
   step: EscalationStep,
   queryOpts: BqlQueryOptions = {},
+  stepTimeoutMs: number = 30_000,
 ): string {
   const isMobileDevice = !!queryOpts.mobileDevice;
 
@@ -175,18 +176,23 @@ function buildBqlQuery(
     ? '\n  screenshot(fullPage: false, type: jpeg, quality: 80) { base64 }'
     : '';
 
+  // Use ~40% of the step's time budget for the navigation wait, clamped to [8s, 20s]
+  const navWaitMs = Math.max(8_000, Math.min(20_000, Math.floor(stepTimeoutMs * 0.4)));
+  // Extended wait uses ~60% of the budget, clamped to [12s, 25s]
+  const longWaitMs = Math.max(12_000, Math.min(25_000, Math.floor(stepTimeoutMs * 0.6)));
+
   if (step.postGoto === "wait-nav") {
     return `mutation GetHtml {${preNav}
   goto(url: "${targetUrl}", waitUntil: load) { status time }
-  waitForNavigation(timeout: 8000, waitUntil: networkIdle) { time }${desktopScreenshotLine}
+  waitForNavigation(timeout: ${navWaitMs}, waitUntil: networkIdle) { time }${desktopScreenshotLine}
   html { html }${mobileScreenshotLine}${singleScreenshotLine}
 }`;
   }
 
-  if (step.postGoto === "wait-selector") {
+  if (step.postGoto === "wait-nav-long") {
     return `mutation GetHtml {${preNav}
   goto(url: "${targetUrl}", waitUntil: load) { status time }
-  waitForSelector(selector: "main, #root, [data-testid], article, [role=main]", timeout: 8000, visible: true) { time }${desktopScreenshotLine}
+  waitForNavigation(timeout: ${longWaitMs}, waitUntil: networkIdle) { time }${desktopScreenshotLine}
   html { html }${mobileScreenshotLine}${singleScreenshotLine}
 }`;
   }
@@ -213,7 +219,7 @@ async function bqlGetHtml(
   queryOpts: BqlQueryOptions = {},
   stepTimeoutMs?: number,
 ): Promise<BqlNavigateResult> {
-  let query = buildBqlQuery(targetUrl, step, queryOpts);
+  let query = buildBqlQuery(targetUrl, step, queryOpts, stepTimeoutMs);
   let data: BqlResponse;
 
   try {
@@ -224,7 +230,7 @@ async function bqlGetHtml(
     });
   } catch (err) {
     if (step.verify) {
-      query = buildBqlQuery(targetUrl, { ...step, verify: false }, queryOpts);
+      query = buildBqlQuery(targetUrl, { ...step, verify: false }, queryOpts, stepTimeoutMs);
       data = await callBql(query, token, cloudUrl, {
         proxy: step.proxy,
         humanlike: step.humanlike,
