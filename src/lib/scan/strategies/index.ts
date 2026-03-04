@@ -22,10 +22,10 @@ import { PlaywrightBaaSStrategy } from "./playwright-baas";
 export type ScanStrategyName = "local" | "baas" | "bql" | "fallback";
 
 function detectDefaultStrategy(): ScanStrategyName {
+  // On Vercel, always use BaaS→BQL fallback (BROWSERLESS_URL is for local Docker only)
+  if (process.env.VERCEL && process.env.BROWSERLESS_TOKEN) return "fallback";
   // BROWSERLESS_URL points at a local Docker Browserless instance
   if (process.env.BROWSERLESS_URL) return "local";
-  // On Vercel with a cloud token, use BaaS→BQL fallback chain
-  if (process.env.VERCEL && process.env.BROWSERLESS_TOKEN) return "fallback";
   // Local dev without Docker → system Playwright
   return "local";
 }

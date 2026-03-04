@@ -265,6 +265,17 @@ async function bqlGetHtml(
   const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
   const pageTitle = titleMatch?.[1]?.trim() ?? "";
 
+  const hasDesktop = !!desktopShot?.base64;
+  const hasMobile = !!mobileShot?.base64;
+  const hasSingle = !!singleShot?.base64;
+  console.warn(
+    `[BQL] Response: html=${html.length}B, title="${pageTitle.slice(0, 50)}", ` +
+    `screenshots: desktop=${hasDesktop ? `${desktopShot!.base64!.length}B` : "none"}, ` +
+    `mobile=${hasMobile ? `${mobileShot!.base64!.length}B` : "none"}, ` +
+    `single=${hasSingle ? `${singleShot!.base64!.length}B` : "none"}, ` +
+    `BQL response keys: ${d ? Object.keys(d).join(", ") : "none"}`,
+  );
+
   return {
     html,
     pageTitle,
@@ -337,24 +348,28 @@ export class BqlJsdomStrategy implements ScanStrategy {
       screenshot: opts.captureScreenshot,
     });
 
-    // If HTML came back but screenshots didn't, retry with a dedicated
-    // screenshot-only query. The WAF challenge should be cached, so the
-    // second navigation is typically fast (~5-10s).
-    const screenshotsMissing =
-      opts.captureScreenshot &&
-      !fetchResult.screenshotBase64 &&
-      !fetchResult.mobileScreenshotBase64;
+    // Retry if any screenshot is missing. BQL sometimes returns mobile but
+    // not desktop (or vice versa) due to timing/render races.
+    const needDesktop = opts.captureScreenshot && !fetchResult.screenshotBase64;
+    const needMobile = opts.captureScreenshot && !fetchResult.mobileScreenshotBase64;
 
-    if (screenshotsMissing) {
+    if (needDesktop || needMobile) {
       const elapsed = Date.now() - scanStart;
       const remaining = opts.timeBudgetMs - elapsed;
+      const missing = [needDesktop && "desktop", needMobile && "mobile"].filter(Boolean).join("+");
       if (remaining > 20_000) {
-        console.log(`[BQL] Screenshots missing — retrying with dedicated query (${Math.round(remaining / 1000)}s remaining)`);
+        console.warn(`[BQL] Screenshot(s) missing (${missing}) — retrying (${Math.round(remaining / 1000)}s remaining)`);
         const retryResult = await this.retryScreenshots(url, Math.min(remaining - 5_000, 60_000));
         if (retryResult) {
-          fetchResult.screenshotBase64 = retryResult.desktopBase64;
-          fetchResult.mobileScreenshotBase64 = retryResult.mobileBase64;
+          if (needDesktop && retryResult.desktopBase64) {
+            fetchResult.screenshotBase64 = retryResult.desktopBase64;
+          }
+          if (needMobile && retryResult.mobileBase64) {
+            fetchResult.mobileScreenshotBase64 = retryResult.mobileBase64;
+          }
         }
+      } else {
+        console.warn(`[BQL] Screenshot(s) missing (${missing}) but only ${Math.round(remaining / 1000)}s left — skipping retry`);
       }
     }
 
@@ -374,6 +389,11 @@ export class BqlJsdomStrategy implements ScanStrategy {
 
     const platform = detectPlatformFromHtml(fetchResult.content);
 
+    const screenshotWarning =
+      opts.captureScreenshot && !screenshot
+        ? `BQL returned no desktop screenshot (html=${fetchResult.content.length}B, mobile=${mobileScreenshot ? `${mobileScreenshot.length}B` : "none"})`
+        : undefined;
+
     const result: StrategyScanResult = {
       violations: axeResult.violations,
       rawViolations: axeResult.rawViolations,
@@ -381,6 +401,7 @@ export class BqlJsdomStrategy implements ScanStrategy {
       scanMode: buildJsdomScanMode(axeResult.rulesRun),
       pageTitle: fetchResult.pageTitle,
       screenshot,
+      screenshotWarning,
       platform,
       warning:
         axeResult.violations.total === 0 && fetchResult.content.length < 10_000
@@ -496,13 +517,15 @@ export class BqlJsdomStrategy implements ScanStrategy {
           const nextStep = ESCALATION_CHAIN[i + 1];
           if (nextStep) {
             console.log(
-              `[BQL] WAF detected (${wafCheck.type}) — escalating to ${nextStep.label}`,
+              `[BQL] ${wafCheck.type === "unreachable" ? "Page unreachable" : `WAF detected (${wafCheck.type})`} — escalating to ${nextStep.label}`,
             );
             await new Promise((r) => setTimeout(r, 500));
             continue;
           }
           throw new ScanBlockedError(
-            "This site's firewall blocked our scanner even with bypass enabled.",
+            wafCheck.type === "unreachable"
+              ? "This site could not be reached by our cloud browser. The site may be blocking automated access or experiencing issues."
+              : "This site's firewall blocked our scanner even with bypass enabled.",
             nav.pageTitle,
             nav.httpStatus ?? 403,
           );

@@ -122,4 +122,29 @@ describe("checkBqlNavigation", () => {
     const result = checkBqlNavigation(html, "Access Denied", 403);
     expect(result).toEqual({ detected: true, type: "cloudflare" });
   });
+
+  it("detects Chrome 'This site can't be reached' error page", () => {
+    const html =
+      '<html><head><title>www.imdb.com</title></head><body>' +
+      '<div id="main-frame-error" class="neterror">' +
+      "This site can't be reached" +
+      "</div></body></html>";
+    const result = checkBqlNavigation(html, "www.imdb.com", 0);
+    expect(result).toEqual({ detected: true, type: "unreachable" });
+  });
+
+  it("detects unreachable by httpStatus 0 alone", () => {
+    const html = "<html><head></head><body>something</body></html>";
+    const result = checkBqlNavigation(html, "", 0);
+    expect(result).toEqual({ detected: true, type: "unreachable" });
+  });
+
+  it("detects Chrome error page by content markers", () => {
+    const html =
+      "<html>" + "x".repeat(100_000) +
+      "chrome-error://chromewebdata/" +
+      "</html>";
+    const result = checkBqlNavigation(html, "example.com", 200);
+    expect(result).toEqual({ detected: true, type: "unreachable" });
+  });
 });

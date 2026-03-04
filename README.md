@@ -31,9 +31,9 @@ A friendly accessibility audit tool that provides AI insights and specific, acti
 - 📋 **Export Reports** — Copy markdown reports including both desktop and mobile results
 - 🛡️ **Rate Limiting & Concurrency** — Per-user (30/hr authenticated, 10/hr anonymous) sliding window and global concurrency cap via Upstash Redis
 - 🔒 **SSRF Protection** — URL validation blocks private IP ranges and non-HTTP schemes in production
-- 📸 **Page Screenshots** — Captures JPEG screenshots at both viewports so users can verify the scanner reached the real site (including WAF-bypassed sites via BQL, quality 90 for BQL / 75 for Playwright)
-- 🧱 **WAF Bypass (BQL + JSDOM)** — Automatically detects and bypasses Web Application Firewalls using Browserless BrowserQL stealth mode with a 3-tier escalation chain (stealth + proxy, extended navigation wait, Cloudflare challenge solver), falling back to server-side axe-core via JSDOM for structural accessibility checks
-- 🔀 **Smart Fallback Strategy** — Tries fast Playwright BaaS first, detects WAF blocks or timeouts, then escalates to BQL for authenticated users. Correctly distinguishes WAF blocks from Browserless API errors (quota, auth). Leverages Vercel Pro's 5-minute function limit for complex WAF bypasses.
+- 📸 **Page Screenshots** — Captures JPEG screenshots at both viewports so users can verify the scanner reached the real site (including WAF-bypassed sites via BQL, quality 90 for BQL / 75 for Playwright). Includes a retry mechanism when BQL returns partial screenshots.
+- 🧱 **WAF Bypass (BQL + JSDOM)** — Automatically detects and bypasses Web Application Firewalls using Browserless BrowserQL stealth mode with a 3-tier escalation chain (stealth + proxy, extended navigation wait, Cloudflare challenge solver), falling back to server-side axe-core via JSDOM for structural accessibility checks. Detects Chrome error pages ("site can't be reached") and retries through the escalation chain instead of returning garbage results.
+- 🔀 **Smart Fallback Strategy** — Tries fast Playwright BaaS first, detects WAF blocks or timeouts, then escalates to BQL for authenticated users. Correctly distinguishes WAF blocks from Browserless API errors (quota, auth). Leverages Vercel Pro's 5-minute function limit for complex WAF bypasses. Strategy auto-detection prioritizes Vercel environment to prevent misconfiguration.
 - 📱 **Smart Dual-Viewport for BQL** — Detects adaptive serving (mobile subdomains, AMP alternates, Vary headers) and only runs a second BQL call when the site genuinely serves different mobile HTML. Responsive sites reuse a single scan.
 - 🗺️ **Domain Strategy Cache** — Remembers which domains need BQL bypass via Redis, skipping the BaaS attempt on repeat scans (saves 5-10s per scan, 7-day TTL)
 - 📊 **Usage Monitoring & Circuit Breaker** — Tracks Browserless unit consumption with an in-memory budget tracker. Automatically disables BQL at 95% monthly budget to prevent billing surprises.
@@ -43,6 +43,7 @@ A friendly accessibility audit tool that provides AI insights and specific, acti
 - ⚙️ **Graceful Degradation** — Runs without env vars for local demos; a banner warns which features are disabled
 - 💻 **CLI Tool** — Scan sites from your terminal with `a11ygarden <url>`, dual-viewport by default with a `--desktop-only` flag
 - 🩺 **Health Check** — `GET /api/health/browserless` verifies BaaS and BQL API connectivity with latency measurements
+- 📏 **Response Size Safety** — Monitors API response size; if results exceed Vercel's 4.5MB limit (large sites with screenshots), screenshots are gracefully dropped with a warning instead of silently failing
 
 ---
 
@@ -322,7 +323,7 @@ NEXT_PUBLIC_CONVEX_URL=https://your-deployment.convex.cloud
 # BROWSERLESS_URL=ws://localhost:3001 (local Docker)
 
 # Browserless Cloud BQL endpoint (WAF bypass via stealth + proxies)
-# On Vercel with BROWSERLESS_TOKEN, `fallback` becomes the default strategy:
+# On Vercel with BROWSERLESS_TOKEN, `fallback` is auto-detected (highest priority):
 # tries BaaS first, escalates to BQL on WAF detection.
 # Locally, BROWSERLESS_TOKEN alone does NOT trigger fallback (uses local Playwright).
 # BROWSERLESS_CLOUD_URL=https://production-sfo.browserless.io
@@ -355,11 +356,13 @@ NEXT_PUBLIC_CONVEX_URL=https://your-deployment.convex.cloud
 
 **Auto-detection logic** (when `SCAN_STRATEGY` is unset):
 
-| Environment | Strategy | Reason |
-|-------------|----------|--------|
-| `BROWSERLESS_URL` set | `local` | Docker Browserless for localhost scanning |
-| On Vercel + `BROWSERLESS_TOKEN` | `fallback` | BaaS → BQL escalation for WAF bypass |
-| Local dev (neither set) | `local` | System Playwright, simplest setup |
+| Priority | Environment | Strategy | Reason |
+|----------|-------------|----------|--------|
+| 1 | On Vercel + `BROWSERLESS_TOKEN` | `fallback` | BaaS → BQL escalation for WAF bypass |
+| 2 | `BROWSERLESS_URL` set (local only) | `local` | Docker Browserless for localhost scanning |
+| 3 | Local dev (neither set) | `local` | System Playwright, simplest setup |
+
+> **Important:** Vercel is always checked first. Even if `BROWSERLESS_URL` is accidentally set in Vercel env vars, the strategy correctly resolves to `fallback`. Do **not** set `BROWSERLESS_URL` on Vercel — it is for local Docker only.
 
 ### What happens when variables are missing?
 
@@ -375,7 +378,7 @@ The app is designed to degrade gracefully rather than crash:
 | `OPENAI_API_KEY` (.env.local) | CLI and local mode skip AI summary when missing. | N/A (CLI / local mode only). |
 | `UPSTASH_REDIS_REST_URL/TOKEN` | Rate limiting and domain cache disabled — all scans allowed, no WAF-domain memory. | **Required** — prevents abuse via per-user rate limits, concurrency caps, and caches domain strategies. |
 | `RATE_LIMIT_ENABLED` | Rate limiting stays off (default). Set to `true` to test locally. | Not needed — rate limiting is always on when Upstash vars are present. |
-| `SCAN_STRATEGY` | Auto-detected: `fallback` on Vercel with token, `local` otherwise. | Usually leave unset for auto-detection. Override to force a specific strategy. |
+| `SCAN_STRATEGY` | Auto-detected: `fallback` on Vercel with token (checked first), `local` otherwise. | Usually leave unset for auto-detection. Override to force a specific strategy. |
 
 ---
 
@@ -456,7 +459,7 @@ The app is designed to degrade gracefully rather than crash:
 │   │   ├── mode.ts                # Local vs. web mode detection
 │   │   └── scan/                  # Scan strategy subsystem
 │   │       ├── strategies/
-│   │       │   ├── index.ts           # Strategy factory (auto-detects via VERCEL env)
+│   │       │   ├── index.ts           # Strategy factory (Vercel-first auto-detection)
 │   │       │   ├── types.ts           # ScanStrategy interface + ScanMetadata
 │   │       │   ├── playwright-local.ts # Local Playwright strategy
 │   │       │   ├── playwright-baas.ts  # Cloud Playwright (BaaS) strategy
@@ -469,7 +472,7 @@ The app is designed to degrade gracefully rather than crash:
 │   │       │   ├── categories.ts      # axe-core rule classifications
 │   │       │   └── jsdom-compatible.ts # JSDOM-safe rule list
 │   │       ├── utils/
-│   │       │   ├── waf-detector.ts    # WAF type detection heuristics
+│   │       │   ├── waf-detector.ts    # WAF + Chrome error page detection heuristics
 │   │       │   └── adaptive-detect.ts # Adaptive serving detection
 │   │       ├── axe-jsdom.ts           # Server-side axe-core via JSDOM
 │   │       └── domain-cache.ts        # Redis-backed domain strategy cache
@@ -548,10 +551,10 @@ The app is designed to degrade gracefully rather than crash:
 4. **URL validated** — SSRF protection blocks private IPs and non-HTTP schemes in production
 5. **robots.txt checked** — Advisory check; disallowed pages still scan but results show a notice
 6. **Domain cache consulted** — Redis lookup for known-WAF domains. If the domain previously required BQL, skip straight to BQL for authenticated users (saves 5-10s)
-7. **Strategy selected** — On Vercel with `BROWSERLESS_TOKEN`, the fallback strategy tries BaaS first, then escalates to BQL on WAF detection or timeout. Browserless API errors (quota/auth) are caught early and surfaced as infrastructure errors, not false WAF detections. Can be overridden via `SCAN_STRATEGY` env var.
+7. **Strategy selected** — Auto-detection checks Vercel first (highest priority), then `BROWSERLESS_URL` for local Docker. On Vercel with `BROWSERLESS_TOKEN`, the fallback strategy tries BaaS first, then escalates to BQL on WAF detection or timeout. Browserless API errors (quota/auth) are caught early and surfaced as infrastructure errors, not false WAF detections. Can be overridden via `SCAN_STRATEGY` env var.
 8. **Desktop scan** — Depending on strategy:
    - **Playwright (BaaS/local):** Opens a browser context at 1920x1080, navigates, runs axe-core, captures JPEG screenshot (quality 75)
-   - **BQL + JSDOM:** Stealth BQL navigates the page through a 3-tier escalation chain (stealth+proxy → extended wait → Cloudflare verify), captures desktop + mobile screenshots in a single session via GraphQL aliases (quality 90), then runs axe-core server-side against the HTML via JSDOM (structural rules only). Dynamic timeouts adapt to the available time budget.
+   - **BQL + JSDOM:** Stealth BQL navigates the page through a 3-tier escalation chain (stealth+proxy → extended wait → Cloudflare verify), captures desktop + mobile screenshots in a single session via GraphQL aliases (quality 90), then runs axe-core server-side against the HTML via JSDOM (structural rules only). Dynamic timeouts adapt to the available time budget. Chrome error pages are detected and trigger re-escalation. If either screenshot is missing after navigation, a dedicated retry query re-navigates (WAF challenge should be cached).
 9. **Mobile scan** — Depending on strategy:
    - **Playwright:** Opens a second context at 390x844 with iPhone emulation, runs axe-core + screenshot in parallel with desktop
    - **BQL responsive sites:** Reuses desktop HTML + axe results (JSDOM is viewport-independent), serves the mobile screenshot captured in the desktop BQL session
@@ -576,7 +579,11 @@ When the fallback strategy detects a WAF block (or BaaS fails for any site-level
 
 **Error classification:** Browserless API errors (401 quota exhausted, 403 auth failed) are correctly distinguished from WAF blocks — they surface a clear "scanner service temporarily unavailable" message instead of falsely triggering the WAF flow.
 
+**Unreachable sites:** If the cloud browser can't reach the target site at all (DNS failure, connection refused), the Chrome error page is detected via content markers (`chrome-error://`, `neterror`, etc.) and `httpStatus === 0`. The escalation chain retries through all tiers before surfacing a clear "site could not be reached" error instead of returning garbage results from the error page.
+
 **Unsolvable challenges:** Some sites use interactive CAPTCHA challenges (e.g., HUMAN Security / PerimeterX "Press & Hold" on Walmart) that require physical human interaction and cannot be bypassed by any automated tool. These are detected — even when the challenge is an overlay on top of real page content — and reported as a block rather than producing false scan results.
+
+**Screenshot resilience:** BQL sometimes returns one screenshot but not the other due to timing/render races. A retry mechanism fires if *either* desktop or mobile screenshot is missing (not just both), using a dedicated screenshot query that re-navigates through the cached WAF session.
 
 If all three tiers fail, the scan returns a blocked error. The auth gate ensures only signed-in users consume BQL units. The circuit breaker disables BQL at 95% of the monthly unit budget.
 
@@ -725,6 +732,8 @@ BROWSERLESS_TOKEN=your-token
 BROWSERLESS_CLOUD_URL=wss://production-sfo.browserless.io
 BROWSERLESS_MONTHLY_UNIT_BUDGET=1000
 ```
+
+> **Do NOT set `BROWSERLESS_URL` on Vercel.** This variable is for local Docker Browserless only (`ws://localhost:3001`). Setting it on Vercel forces the `local` strategy, which bypasses WAF detection, BQL escalation, and stealth routing — scans will silently fail or return incorrect results for WAF-protected sites.
 
 The `BROWSERLESS_TOKEN` enables Playwright BaaS (fast path) and BQL (WAF bypass). The `BROWSERLESS_CLOUD_URL` enables BQL stealth routing via residential proxies for WAF-protected sites (the code normalizes `wss://` to `https://` for HTTP API calls). The budget variable controls the circuit breaker threshold.
 
