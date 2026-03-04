@@ -36,10 +36,30 @@ describe("detectWaf", () => {
     expect(result).toEqual({ detected: true, type: "akamai" });
   });
 
-  it("detects PerimeterX challenge", () => {
+  it("detects PerimeterX challenge (small page)", () => {
     const html =
       '<html><head><title>Security Check</title></head><body><div id="px-captcha"></div></body></html>';
     const result = detectWaf(html, "Security Check", 200);
+    expect(result).toEqual({ detected: true, type: "perimeterx" });
+  });
+
+  it("detects HUMAN Security 'Press & Hold' overlay on large pages", () => {
+    const html =
+      "<html><head><title>Walmart</title></head><body>" +
+      "x".repeat(50_000) +
+      '<div class="human-challenge">Robot or human? PRESS &amp; HOLD</div>' +
+      "</body></html>";
+    const result = detectWaf(html, "Walmart", 200);
+    expect(result).toEqual({ detected: true, type: "perimeterx" });
+  });
+
+  it("detects 'press and hold' variant on large pages", () => {
+    const html =
+      "<html><head><title>Shopping</title></head><body>" +
+      "x".repeat(30_000) +
+      "Activate and hold the button to confirm that you're human. Press and hold" +
+      "</body></html>";
+    const result = detectWaf(html, "Shopping", 200);
     expect(result).toEqual({ detected: true, type: "perimeterx" });
   });
 

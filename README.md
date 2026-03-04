@@ -576,6 +576,8 @@ When the fallback strategy detects a WAF block (or BaaS fails for any site-level
 
 **Error classification:** Browserless API errors (401 quota exhausted, 403 auth failed) are correctly distinguished from WAF blocks — they surface a clear "scanner service temporarily unavailable" message instead of falsely triggering the WAF flow.
 
+**Unsolvable challenges:** Some sites use interactive CAPTCHA challenges (e.g., HUMAN Security / PerimeterX "Press & Hold" on Walmart) that require physical human interaction and cannot be bypassed by any automated tool. These are detected — even when the challenge is an overlay on top of real page content — and reported as a block rather than producing false scan results.
+
 If all three tiers fail, the scan returns a blocked error. The auth gate ensures only signed-in users consume BQL units. The circuit breaker disables BQL at 95% of the monthly unit budget.
 
 ### Scan Modes
