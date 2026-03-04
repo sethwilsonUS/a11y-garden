@@ -119,12 +119,7 @@ export function ScanForm() {
     }
 
     try {
-      const urlObj = new URL(normalizedUrl);
-      // Strip "www." prefix to avoid duplicate records
-      if (urlObj.hostname.startsWith("www.")) {
-        urlObj.hostname = urlObj.hostname.slice(4);
-      }
-      normalizedUrl = urlObj.toString();
+      new URL(normalizedUrl);
     } catch {
       setError("Please enter a valid URL");
       setIsSubmitting(false);

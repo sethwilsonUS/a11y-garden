@@ -515,9 +515,15 @@ export const getAuditHistory = query({
   handler: async (ctx, args) => {
     const callerId = await getAuthUserId(ctx);
 
+    const urlObj = new URL(args.url);
+    if (urlObj.hostname.startsWith("www.")) {
+      urlObj.hostname = urlObj.hostname.slice(4);
+    }
+    const normalizedUrl = urlObj.toString();
+
     const audits = await ctx.db
       .query("audits")
-      .withIndex("by_url", (q) => q.eq("url", args.url))
+      .withIndex("by_url", (q) => q.eq("url", normalizedUrl))
       .filter((q) =>
         q.and(
           q.eq(q.field("status"), "complete"),
