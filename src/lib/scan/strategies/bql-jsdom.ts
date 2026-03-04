@@ -268,7 +268,7 @@ async function bqlGetHtml(
   const hasDesktop = !!desktopShot?.base64;
   const hasMobile = !!mobileShot?.base64;
   const hasSingle = !!singleShot?.base64;
-  console.log(
+  console.warn(
     `[BQL] Response: html=${html.length}B, title="${pageTitle.slice(0, 50)}", ` +
     `screenshots: desktop=${hasDesktop ? `${desktopShot!.base64!.length}B` : "none"}, ` +
     `mobile=${hasMobile ? `${mobileShot!.base64!.length}B` : "none"}, ` +
@@ -348,24 +348,28 @@ export class BqlJsdomStrategy implements ScanStrategy {
       screenshot: opts.captureScreenshot,
     });
 
-    // If HTML came back but screenshots didn't, retry with a dedicated
-    // screenshot-only query. The WAF challenge should be cached, so the
-    // second navigation is typically fast (~5-10s).
-    const screenshotsMissing =
-      opts.captureScreenshot &&
-      !fetchResult.screenshotBase64 &&
-      !fetchResult.mobileScreenshotBase64;
+    // Retry if any screenshot is missing. BQL sometimes returns mobile but
+    // not desktop (or vice versa) due to timing/render races.
+    const needDesktop = opts.captureScreenshot && !fetchResult.screenshotBase64;
+    const needMobile = opts.captureScreenshot && !fetchResult.mobileScreenshotBase64;
 
-    if (screenshotsMissing) {
+    if (needDesktop || needMobile) {
       const elapsed = Date.now() - scanStart;
       const remaining = opts.timeBudgetMs - elapsed;
+      const missing = [needDesktop && "desktop", needMobile && "mobile"].filter(Boolean).join("+");
       if (remaining > 20_000) {
-        console.log(`[BQL] Screenshots missing — retrying with dedicated query (${Math.round(remaining / 1000)}s remaining)`);
+        console.warn(`[BQL] Screenshot(s) missing (${missing}) — retrying (${Math.round(remaining / 1000)}s remaining)`);
         const retryResult = await this.retryScreenshots(url, Math.min(remaining - 5_000, 60_000));
         if (retryResult) {
-          fetchResult.screenshotBase64 = retryResult.desktopBase64;
-          fetchResult.mobileScreenshotBase64 = retryResult.mobileBase64;
+          if (needDesktop && retryResult.desktopBase64) {
+            fetchResult.screenshotBase64 = retryResult.desktopBase64;
+          }
+          if (needMobile && retryResult.mobileBase64) {
+            fetchResult.mobileScreenshotBase64 = retryResult.mobileBase64;
+          }
         }
+      } else {
+        console.warn(`[BQL] Screenshot(s) missing (${missing}) but only ${Math.round(remaining / 1000)}s left — skipping retry`);
       }
     }
 
