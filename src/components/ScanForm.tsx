@@ -201,8 +201,6 @@ export function ScanForm() {
         throw new Error(scanResult.error || "Scan failed");
       }
 
-      console.log("[A11y Garden] API response platform:", scanResult.platform);
-
       // Step 2: Scan succeeded — now create the audit in Convex
       setScanStatus("Saving results...");
       auditId = await createAudit({
