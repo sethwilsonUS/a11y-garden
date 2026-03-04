@@ -178,7 +178,7 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      return NextResponse.json({
+      const responsePayload = {
         gradingVersion: GRADING_VERSION,
         ...(desktopResult.pageTitle && { pageTitle: desktopResult.pageTitle }),
         ...(desktopResult.platform && { platform: desktopResult.platform }),
@@ -234,7 +234,61 @@ export async function POST(request: NextRequest) {
             screenshotWarning: mobileResult.screenshotWarning,
           }),
         },
-      });
+      };
+
+      const responseJson = JSON.stringify(responsePayload);
+      const responseSizeMB = (responseJson.length / (1024 * 1024)).toFixed(2);
+      const desktopScreenshotKB = desktopResult.screenshot
+        ? Math.round(desktopResult.screenshot.toString("base64").length / 1024)
+        : 0;
+      const mobileScreenshotKB = mobileResult.screenshot
+        ? Math.round(mobileResult.screenshot.toString("base64").length / 1024)
+        : 0;
+      console.log(
+        `[Scan] Response size: ${responseSizeMB}MB ` +
+        `(desktop screenshot: ${desktopScreenshotKB}KB, mobile: ${mobileScreenshotKB}KB, ` +
+        `rawViolations: ${Math.round((desktopResult.rawViolations.length + mobileResult.rawViolations.length) / 1024)}KB)`,
+      );
+
+      // Vercel has a 4.5MB response body limit. If we're over, drop screenshots
+      // to ensure results still get through.
+      if (responseJson.length > 4_400_000) {
+        console.warn(
+          `[Scan] Response ${responseSizeMB}MB exceeds Vercel safe limit — dropping screenshots to fit`,
+        );
+        delete (responsePayload as Record<string, unknown>).desktop;
+        delete (responsePayload as Record<string, unknown>).mobile;
+        const stripped = {
+          ...responsePayload,
+          desktop: {
+            violations: desktopResult.violations,
+            letterGrade: desktopGrade.grade,
+            score: desktopGrade.score,
+            rawViolations: desktopResult.rawViolations,
+            safeMode: desktopResult.scanMode.mode !== "full",
+            scanMode: toScanModeField(desktopResult.scanMode),
+            scanModeDetail: desktopResult.scanMode,
+            ...(desktopResult.truncated && { truncated: true }),
+            ...(desktopResult.warning && { warning: desktopResult.warning }),
+            screenshotWarning: "Screenshot omitted — response too large for serverless delivery.",
+          },
+          mobile: {
+            violations: mobileResult.violations,
+            letterGrade: mobileGrade.grade,
+            score: mobileGrade.score,
+            rawViolations: mobileResult.rawViolations,
+            safeMode: mobileResult.scanMode.mode !== "full",
+            scanMode: toScanModeField(mobileResult.scanMode),
+            scanModeDetail: mobileResult.scanMode,
+            ...(mobileResult.truncated && { truncated: true }),
+            ...(mobileResult.warning && { warning: mobileResult.warning }),
+            screenshotWarning: "Screenshot omitted — response too large for serverless delivery.",
+          },
+        };
+        return NextResponse.json(stripped);
+      }
+
+      return NextResponse.json(responsePayload);
     } finally {
       // Always release the concurrency slot, even on error
       await releaseConcurrencySlot();

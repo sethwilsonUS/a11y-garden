@@ -265,6 +265,17 @@ async function bqlGetHtml(
   const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
   const pageTitle = titleMatch?.[1]?.trim() ?? "";
 
+  const hasDesktop = !!desktopShot?.base64;
+  const hasMobile = !!mobileShot?.base64;
+  const hasSingle = !!singleShot?.base64;
+  console.log(
+    `[BQL] Response: html=${html.length}B, title="${pageTitle.slice(0, 50)}", ` +
+    `screenshots: desktop=${hasDesktop ? `${desktopShot!.base64!.length}B` : "none"}, ` +
+    `mobile=${hasMobile ? `${mobileShot!.base64!.length}B` : "none"}, ` +
+    `single=${hasSingle ? `${singleShot!.base64!.length}B` : "none"}, ` +
+    `BQL response keys: ${d ? Object.keys(d).join(", ") : "none"}`,
+  );
+
   return {
     html,
     pageTitle,
