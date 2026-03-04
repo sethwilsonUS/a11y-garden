@@ -67,10 +67,11 @@ export async function POST(request: NextRequest) {
       if (userId) {
         convexToken = await authResult.getToken({ template: "convex" }) ?? null;
       }
-    } catch {
-      // Clerk middleware may not be configured (local mode, tests, etc.)
+    } catch (authErr) {
+      console.warn("[Scan] Clerk auth() failed:", authErr instanceof Error ? authErr.message : authErr);
     }
     const isAuthenticated = !!userId;
+    console.warn(`[Scan] auth resolved: userId=${userId ? "present" : "null"}, convexToken=${convexToken ? "present" : "null"}, isAuthenticated=${isAuthenticated}`);
 
     // ---- Rate limit (per-user or per-IP) ------------------------------------
     const ip =
