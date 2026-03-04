@@ -16,7 +16,8 @@ export type WafType =
   | "akamai"
   | "perimeterx"
   | "generic"
-  | "empty-shell";
+  | "empty-shell"
+  | "unreachable";
 
 export interface WafDetection {
   detected: boolean;
@@ -86,8 +87,11 @@ export function detectWaf(
   return { detected: false, type: null };
 }
 
+// Chrome error pages contain these markers (e.g. "This site can't be reached")
+const CHROME_ERROR_RE = /chrome-error:\/\/|id="main-frame-error"|neterror|ERR_CONNECTION|ERR_NAME_NOT_RESOLVED|ERR_TIMED_OUT|this site can.t be reached/i;
+
 /**
- * Check a BQL navigation result for WAF or empty shell pages.
+ * Check a BQL navigation result for WAF, Chrome error pages, or empty shells.
  * Returns null if the page looks like real content.
  */
 export function checkBqlNavigation(
@@ -95,6 +99,12 @@ export function checkBqlNavigation(
   pageTitle: string,
   httpStatus: number,
 ): WafDetection | null {
+  // Chrome "This site can't be reached" / DNS failure / connection refused.
+  // httpStatus is 0 or null when the browser never got an HTTP response.
+  if (httpStatus === 0 || CHROME_ERROR_RE.test(html)) {
+    return { detected: true, type: "unreachable" };
+  }
+
   const waf = detectWaf(html, pageTitle, httpStatus);
   if (waf.detected) return waf;
 

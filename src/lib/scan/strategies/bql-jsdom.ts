@@ -517,13 +517,15 @@ export class BqlJsdomStrategy implements ScanStrategy {
           const nextStep = ESCALATION_CHAIN[i + 1];
           if (nextStep) {
             console.log(
-              `[BQL] WAF detected (${wafCheck.type}) — escalating to ${nextStep.label}`,
+              `[BQL] ${wafCheck.type === "unreachable" ? "Page unreachable" : `WAF detected (${wafCheck.type})`} — escalating to ${nextStep.label}`,
             );
             await new Promise((r) => setTimeout(r, 500));
             continue;
           }
           throw new ScanBlockedError(
-            "This site's firewall blocked our scanner even with bypass enabled.",
+            wafCheck.type === "unreachable"
+              ? "This site could not be reached by our cloud browser. The site may be blocking automated access or experiencing issues."
+              : "This site's firewall blocked our scanner even with bypass enabled.",
             nav.pageTitle,
             nav.httpStatus ?? 403,
           );
