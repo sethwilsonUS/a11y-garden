@@ -104,7 +104,7 @@ export const createAudit = mutation({
       letterGrade: "F",
       score: 0,
       userId: userId ?? undefined,
-      isPublic: args.isPublic,
+      isPublic: userId ? args.isPublic : false,
     });
 
     // Note: Scanner is now triggered client-side via Next.js API route
@@ -129,7 +129,12 @@ export const getPublicAudits = query({
     const allPublic = await ctx.db
       .query("audits")
       .withIndex("by_public", (q) => q.eq("isPublic", true))
-      .filter((q) => q.eq(q.field("status"), "complete"))
+      .filter((q) =>
+        q.and(
+          q.eq(q.field("status"), "complete"),
+          q.neq(q.field("userId"), undefined),
+        ),
+      )
       .collect();
 
     return deduplicateByUrl(allPublic);
@@ -431,7 +436,10 @@ export const updateAuditVisibility = mutation({
     isPublic: v.boolean(),
   },
   handler: async (ctx, args) => {
-    await verifyAuditOwnership(ctx, args.auditId);
+    const audit = await verifyAuditOwnership(ctx, args.auditId);
+    if (!audit.userId) {
+      throw new Error("Anonymous audits cannot be made public");
+    }
     await ctx.db.patch(args.auditId, { isPublic: args.isPublic });
   },
 });
@@ -444,7 +452,12 @@ export const getRecentAudits = query({
     return await ctx.db
       .query("audits")
       .withIndex("by_public", (q) => q.eq("isPublic", true))
-      .filter((q) => q.eq(q.field("status"), "complete"))
+      .filter((q) =>
+        q.and(
+          q.eq(q.field("status"), "complete"),
+          q.neq(q.field("userId"), undefined),
+        ),
+      )
       .order("desc")
       .take(limit);
   },
@@ -490,8 +503,8 @@ export const searchByDomain = query({
         q.search("domain", args.searchTerm).eq("isPublic", true)
       )
       .take(50);
-    
-    return results;
+
+    return results.filter((a) => a.userId !== undefined);
   },
 });
 
@@ -605,5 +618,24 @@ export const migrateGrades = mutation({
     }
     
     return { updated, skipped, total: allAudits.length };
+  },
+});
+
+// One-off: privatize any anonymous audits that were marked public (spam cleanup).
+// Run from the Convex dashboard, then remove this mutation.
+export const privatizeAnonymousPublicAudits = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const anon = await ctx.db
+      .query("audits")
+      .withIndex("by_public", (q) => q.eq("isPublic", true))
+      .filter((q) => q.eq(q.field("userId"), undefined))
+      .collect();
+
+    for (const audit of anon) {
+      await ctx.db.patch(audit._id, { isPublic: false });
+    }
+
+    return { privatized: anon.length };
   },
 });

@@ -23,8 +23,9 @@ A friendly accessibility audit tool that provides AI insights and specific, acti
 - 🤖 **AI-Powered Insights** — GPT-4.1 Mini translates technical violations into plain English, with separate analysis per viewport
 - 📊 **Letter Grade System** — Per-viewport grades plus a combined weighted grade (60% desktop + 40% mobile)
 - 🧩 **Platform & Framework Detection** — Detects CMS platforms (WordPress, Shopify, Squarespace, etc.) and frontend frameworks (Next.js, React, Angular, Svelte, etc.) with confidence levels, providing platform-specific fix advice
-- 🗄️ **Community Database** — Browse and search accessibility audits shared by other users
+- 🗄️ **Community Database** — Browse and search accessibility audits shared by signed-in users
 - 👤 **User Accounts** — Save and manage your audit history with Clerk authentication
+- 🔐 **Public Garden Protection** — Only authenticated users can publish to the community garden; anonymous scans are always private
 - ⚡ **Real-time Updates** — Live status updates as scans progress
 - 🌗 **Light/Dark Themes** — Modern, accessible interface built with Tailwind CSS v4
 - 🤖 **AI Agent Fix Plans** — Generate downloadable AGENTS.md fix-plan files from audit results, ready to drop into Cursor, Codex, Claude Code, or GitHub Copilot (developer framework sites only)
@@ -429,6 +430,7 @@ The app is designed to degrade gracefully rather than crash:
 │   │   ├── AuditCard.tsx           # Audit card for database/dashboard lists
 │   │   ├── ButtonCard.tsx          # Reusable button card component
 │   │   ├── ScanForm.tsx            # URL input + scan orchestration + WAF progress
+│   │   ├── ScanProgressDisplay.tsx # Shared scan progress display (elapsed time, WAF banner, SR announcements)
 │   │   ├── ScanModeBanner.tsx      # Detailed scan mode info (full/safe/structural)
 │   │   ├── SafeModeModal.tsx       # Modal explaining safe mode
 │   │   ├── StatusIndicator.tsx     # Scan status indicator
@@ -545,8 +547,8 @@ The app is designed to degrade gracefully rather than crash:
 
 ### Scan Flow
 
-1. **User enters a URL** — The scan form validates, normalizes, and strips `www.`
-2. **Auth resolved** — Clerk `auth()` determines the user's identity (anonymous or signed-in)
+1. **User enters a URL** — The scan form validates, normalizes, and strips `www.`. Signed-in users can opt to share results publicly in the community garden; anonymous users always get private results.
+2. **Auth resolved** — Clerk `auth()` determines the user's identity (anonymous or signed-in). Anonymous users can scan freely but their audits are forced to `isPublic: false` server-side.
 3. **Rate limit checked** — Per-user sliding window (30/hr authenticated, 10/hr anonymous) and global concurrency cap (10 simultaneous)
 4. **URL validated** — SSRF protection blocks private IPs and non-HTTP schemes in production
 5. **robots.txt checked** — Advisory check; disallowed pages still scan but results show a notice
@@ -562,7 +564,7 @@ The app is designed to degrade gracefully rather than crash:
 10. **Results truncated** — If raw violations exceed 350 KB per viewport, node arrays are trimmed to stay under Convex's 1 MB document limit
 11. **Platform detected** — CMS platforms and frameworks identified from HTML markers with confidence levels. Detection runs on both Playwright and BQL paths via a shared `detectPlatformFromHtml` utility. AI generates platform-specific fix advice when a platform is detected.
 12. **Domain cache updated** — If WAF was bypassed, the domain is cached in Redis (7-day TTL) for faster repeat scans
-13. **Audit saved** — Scan results for both viewports + WAF metadata (strategy used, WAF type, bypass status, duration) stored in Convex. Screenshots uploaded to file storage.
+13. **Audit saved** — Scan results for both viewports + WAF metadata (strategy used, WAF type, bypass status, duration) stored in Convex. Screenshots uploaded to file storage. Anonymous audits are always private; only authenticated audits can appear in the community garden.
 14. **Grades calculated** — Per-viewport grades (A-F) plus a combined weighted grade (60% desktop + 40% mobile)
 15. **AI analyzes** — OpenAI generates separate summaries for desktop and mobile violations (fires in background). Identical violations reuse previous AI content, unless a platform was newly detected (triggers regeneration with platform-specific context).
 16. **Results displayed** — Tabbed UI with per-viewport grades, violations, screenshots, AI summaries, scan mode banners (full/safe/structural), WAF status badges, and platform-specific fix tips
@@ -618,6 +620,8 @@ Core audit data with per-viewport results and WAF metadata:
 | `wafType` | `string` | WAF vendor: `cloudflare`, `datadome`, `akamai`, etc. |
 | `wafBypassed` | `boolean` | Whether the BQL bypass succeeded |
 | `scanDurationMs` | `number` | Total scan duration in milliseconds |
+| `isPublic` | `boolean` | Whether the audit appears in the community garden (forced `false` for anonymous users) |
+| `userId` | `string?` | Clerk user ID (absent for anonymous scans) |
 | `robotsDisallowed` | `boolean` | Whether `robots.txt` disallows crawling the scanned path |
 
 ### `domainStrategies` table
