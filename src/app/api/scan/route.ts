@@ -131,15 +131,21 @@ export async function POST(request: NextRequest) {
       }
 
       // ---- Real-time progress emitter -----------------------------------------
-      const convexForProgress = auditId ? getConvexClient(convexToken) : null;
       const emitProgress = async (msg: string) => {
-        if (!convexForProgress || !auditId) return;
+        if (!auditId) return;
         try {
-          await convexForProgress.mutation(api.audits.updateScanProgress, {
+          const c = getConvexClient(convexToken);
+          if (!c) return;
+          await c.mutation(api.audits.updateScanProgress, {
             auditId,
             scanProgress: msg,
           });
-        } catch { /* non-blocking */ }
+        } catch (err) {
+          console.warn(
+            `[Scan] emitProgress failed for "${msg}":`,
+            err instanceof Error ? err.message : err,
+          );
+        }
       };
 
       // ---- robots.txt advisory check (non-blocking) --------------------------
