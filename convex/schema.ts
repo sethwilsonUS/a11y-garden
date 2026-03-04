@@ -14,6 +14,7 @@ export default defineSchema({
       v.literal("complete"),
       v.literal("error")
     ),
+    scanProgress: v.optional(v.string()),
 
     // Violation counts
     violations: v.object({

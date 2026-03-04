@@ -28,6 +28,8 @@ export interface ScanStrategyOptions {
   timeBudgetMs: number;
   /** BQL escalation requires authentication */
   isAuthenticated: boolean;
+  /** Optional callback for real-time progress updates (used by FallbackStrategy for WAF detection) */
+  onProgress?: (message: string) => void;
 }
 
 export type ScanStrategyLabel =

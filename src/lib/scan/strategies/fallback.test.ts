@@ -154,4 +154,27 @@ describe("FallbackStrategy", () => {
     expect(result.metadata?.scanDurationMs).toBeGreaterThanOrEqual(0);
     expect(typeof result.metadata?.scanDurationMs).toBe("number");
   });
+
+  it("calls onProgress with waf:-prefixed messages during WAF escalation", async () => {
+    baasBehavior = "waf-blocked";
+    bqlBehavior = "succeed";
+    const onProgress = vi.fn();
+    const strategy = await createStrategy();
+    await strategy.scan(
+      "https://waf-site.com",
+      makeOpts({ isAuthenticated: true, onProgress }),
+    );
+    const calls = onProgress.mock.calls.map((c) => c[0] as string);
+    expect(calls.some((msg) => msg.startsWith("waf:"))).toBe(true);
+    expect(calls).toContain("waf:Firewall detected — attempting bypass...");
+    expect(calls).toContain("waf:Bypass in progress...");
+  });
+
+  it("does not call onProgress on successful BaaS scan", async () => {
+    baasBehavior = "succeed";
+    const onProgress = vi.fn();
+    const strategy = await createStrategy();
+    await strategy.scan("https://example.com", makeOpts({ onProgress }));
+    expect(onProgress).not.toHaveBeenCalled();
+  });
 });

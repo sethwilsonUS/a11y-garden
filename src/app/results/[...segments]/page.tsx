@@ -5,7 +5,7 @@ import { api } from "../../../../convex/_generated/api";
 import { Id } from "../../../../convex/_generated/dataModel";
 import { GradeBadge } from "@/components/GradeBadge";
 import { ViolationCard } from "@/components/ViolationCard";
-import { StatusIndicator } from "@/components/StatusIndicator";
+import { ScanProgressDisplay } from "@/components/ScanProgressDisplay";
 import { calculateGrade, calculateCombinedGrade, GRADING_VERSION } from "@/lib/grading";
 import { generateMarkdownReport, type AxeViolation, type ReportData } from "@/lib/report";
 import { buildResultsUrl, parseResultsSegments } from "@/lib/urls";
@@ -656,7 +656,11 @@ export default function ResultsPage({
               </p>
             </div>
 
-            <StatusIndicator status={audit.status} />
+            <ScanProgressDisplay
+              message={audit.scanProgress}
+              scannedAt={audit.scannedAt}
+              fallbackMessage={audit.status === "scanning" ? "Scanning..." : "Queued..."}
+            />
 
             <p className="text-sm text-theme-muted mt-6">
               This page will update automatically when the scan is complete.

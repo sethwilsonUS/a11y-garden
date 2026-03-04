@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
-import { useMutation } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { useRouter } from "next/navigation";
 import { Id } from "../../convex/_generated/dataModel";
@@ -92,11 +92,24 @@ export function ScanForm() {
     retryAfter?: number;
   } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [activeAuditId, setActiveAuditId] = useState<Id<"audits"> | null>(null);
   const { status: scanStatus, elapsedMs, isLikelyWaf, startProgress, setManualStatus: setScanStatus, stopProgress } = useScanProgress();
   const createAudit = useMutation(api.audits.createAudit);
   const updateAuditStatus = useMutation(api.audits.updateAuditStatus);
   const updateAuditError = useMutation(api.audits.updateAuditError);
   const router = useRouter();
+
+  const auditProgress = useQuery(
+    api.audits.getAudit,
+    activeAuditId ? { auditId: activeAuditId } : "skip",
+  );
+
+  const serverProgress = auditProgress?.scanProgress;
+  const serverWaf = !!serverProgress?.startsWith("waf:");
+  const effectiveStatus = serverProgress
+    ? (serverWaf ? serverProgress.slice(4) : serverProgress)
+    : scanStatus;
+  const showWafBanner = serverWaf || isLikelyWaf;
 
   // Track in-flight scan so the visibilitychange handler can recover
   const scanRef = useRef<{ auditId: string; resultsUrl: string } | null>(null);
@@ -169,6 +182,7 @@ export function ScanForm() {
         url: normalizedUrl,
         isPublic,
       });
+      setActiveAuditId(auditId);
       await updateAuditStatus({ auditId, status: "scanning" });
 
       resultsUrl = buildResultsUrl(normalizedUrl, Date.now(), auditId);
@@ -194,6 +208,7 @@ export function ScanForm() {
         });
         await updateAuditError({ auditId, errorMessage: scanResult.error });
         scanRef.current = null;
+        setActiveAuditId(null);
         setIsSubmitting(false);
         stopProgress();
         return;
@@ -209,6 +224,7 @@ export function ScanForm() {
         setRateLimitInfo({ message: msg });
         await updateAuditError({ auditId, errorMessage: msg });
         scanRef.current = null;
+        setActiveAuditId(null);
         setIsSubmitting(false);
         stopProgress();
         return;
@@ -222,6 +238,7 @@ export function ScanForm() {
       // Results (including screenshots and AI analysis) were already saved to
       // Convex by the API route, so no client-side writes are needed.
       scanRef.current = null;
+      setActiveAuditId(null);
       track("Scan Completed", {
         grade: scanResult.letterGrade,
         score: scanResult.score,
@@ -233,6 +250,7 @@ export function ScanForm() {
       // scanning and will persist results to Convex when done.
       if (auditId && resultsUrl && err instanceof TypeError) {
         scanRef.current = null;
+        setActiveAuditId(null);
         router.push(resultsUrl);
         return;
       }
@@ -246,6 +264,7 @@ export function ScanForm() {
       }
 
       scanRef.current = null;
+      setActiveAuditId(null);
       setIsSubmitting(false);
       stopProgress();
     }
@@ -420,7 +439,7 @@ export function ScanForm() {
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
           </svg>
           <span className="transition-opacity duration-200 flex items-center gap-2">
-            <span>{scanStatus || "Processing..."}</span>
+            <span>{effectiveStatus || "Processing..."}</span>
             {elapsedMs >= 5_000 && (
               <span className="text-xs opacity-60 tabular-nums">
                 {Math.floor(elapsedMs / 60_000) > 0
@@ -432,7 +451,7 @@ export function ScanForm() {
         </span>
       </button>
 
-      {isSubmitting && isLikelyWaf && (
+      {isSubmitting && showWafBanner && (
         <div
           className="mt-3 p-3 rounded-lg bg-blue-50 dark:bg-blue-950/40 border border-blue-300 dark:border-blue-700 text-blue-800 dark:text-blue-200 text-sm flex items-start gap-2.5 animate-in fade-in slide-in-from-top-2 duration-300"
           role="status"
@@ -456,10 +475,10 @@ export function ScanForm() {
 
       {/* Live region for screen reader scan-progress announcements */}
       <div className="sr-only" aria-live="assertive" aria-atomic="true">
-        {isSubmitting ? scanStatus || "Scan in progress…" : ""}
+        {isSubmitting ? effectiveStatus || "Scan in progress…" : ""}
       </div>
       <div className="sr-only" aria-live="polite">
-        {isSubmitting && isLikelyWaf
+        {isSubmitting && showWafBanner
           ? "This site appears to be behind a firewall. Bypass in progress — this can take up to 4 minutes. Your results will be saved automatically."
           : ""}
       </div>

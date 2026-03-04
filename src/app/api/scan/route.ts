@@ -130,8 +130,22 @@ export async function POST(request: NextRequest) {
         );
       }
 
+      // ---- Real-time progress emitter -----------------------------------------
+      const convexForProgress = auditId ? getConvexClient(convexToken) : null;
+      const emitProgress = async (msg: string) => {
+        if (!convexForProgress || !auditId) return;
+        try {
+          await convexForProgress.mutation(api.audits.updateScanProgress, {
+            auditId,
+            scanProgress: msg,
+          });
+        } catch { /* non-blocking */ }
+      };
+
       // ---- robots.txt advisory check (non-blocking) --------------------------
       const robotsCheck = await checkRobotsTxt(validation.url);
+
+      await emitProgress("Preparing scan...");
 
       // ---- Domain strategy cache (skip BaaS for known-WAF domains) -----------
       const domain = new URL(validation.url).hostname.replace(/^www\./, "");
@@ -152,9 +166,11 @@ export async function POST(request: NextRequest) {
         captureScreenshot: true,
         timeBudgetMs: 240_000,
         isAuthenticated,
+        onProgress: (msg) => { emitProgress(msg); },
       };
 
       // ---- Run scans (desktop + mobile) -------------------------------------
+      await emitProgress("Scanning desktop viewport...");
       const desktopResult = await strategy.scan(validation.url, {
         ...strategyOpts,
         viewport: "desktop",
@@ -165,6 +181,7 @@ export async function POST(request: NextRequest) {
         `warning=${desktopResult.screenshotWarning ?? "none"}, strategy=${desktopResult.metadata?.scanStrategy ?? strategy.name}`,
       );
 
+      await emitProgress("Desktop complete — scanning mobile viewport...");
       const mobileResult = await strategy.scan(validation.url, {
         ...strategyOpts,
         viewport: "mobile",
@@ -197,12 +214,15 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      await emitProgress("Processing results...");
+
       // ---- Server-side Convex persistence (mobile-resilient) ----------------
       // When the client provides an auditId, persist results directly to Convex
       // so results survive even if the client disconnects (mobile tab suspend,
       // app switch, screen lock).
       let persisted = false;
       if (auditId) {
+        await emitProgress("Saving results...");
         try {
           const convex = getConvexClient(convexToken);
           if (convex) {

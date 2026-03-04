@@ -105,6 +105,7 @@ export class FallbackStrategy implements ScanStrategy {
 
         if (isScanBlocked) {
           this.wafBlockedUrls.add(url);
+          opts.onProgress?.("waf:Firewall detected — attempting bypass...");
         } else {
           this.baasDisabled = true;
         }
@@ -160,6 +161,8 @@ export class FallbackStrategy implements ScanStrategy {
       "bql_start",
       `Escalating to BQL (${Math.round(remaining / 1000)}s remaining)`,
     );
+
+    opts.onProgress?.("waf:Bypass in progress...");
 
     const bql = await this.getBql();
     const bqlResult = await bql.scan(url, {
