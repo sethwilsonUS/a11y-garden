@@ -389,6 +389,11 @@ export class BqlJsdomStrategy implements ScanStrategy {
 
     const platform = detectPlatformFromHtml(fetchResult.content);
 
+    const screenshotWarning =
+      opts.captureScreenshot && !screenshot
+        ? `BQL returned no desktop screenshot (html=${fetchResult.content.length}B, mobile=${mobileScreenshot ? `${mobileScreenshot.length}B` : "none"})`
+        : undefined;
+
     const result: StrategyScanResult = {
       violations: axeResult.violations,
       rawViolations: axeResult.rawViolations,
@@ -396,6 +401,7 @@ export class BqlJsdomStrategy implements ScanStrategy {
       scanMode: buildJsdomScanMode(axeResult.rulesRun),
       pageTitle: fetchResult.pageTitle,
       screenshot,
+      screenshotWarning,
       platform,
       warning:
         axeResult.violations.total === 0 && fetchResult.content.length < 10_000

@@ -151,10 +151,20 @@ export async function POST(request: NextRequest) {
         viewport: "desktop",
       });
 
+      console.warn(
+        `[Scan] Desktop done: screenshot=${desktopResult.screenshot ? `${desktopResult.screenshot.length}B` : "NONE"}, ` +
+        `warning=${desktopResult.screenshotWarning ?? "none"}, strategy=${desktopResult.metadata?.scanStrategy ?? strategy.name}`,
+      );
+
       const mobileResult = await strategy.scan(validation.url, {
         ...strategyOpts,
         viewport: "mobile",
       });
+
+      console.warn(
+        `[Scan] Mobile done: screenshot=${mobileResult.screenshot ? `${mobileResult.screenshot.length}B` : "NONE"}, ` +
+        `warning=${mobileResult.screenshotWarning ?? "none"}`,
+      );
 
       // ---- Calculate grades (unchanged) -------------------------------------
       const desktopGrade = calculateGrade(desktopResult.violations);
@@ -244,7 +254,7 @@ export async function POST(request: NextRequest) {
       const mobileScreenshotKB = mobileResult.screenshot
         ? Math.round(mobileResult.screenshot.toString("base64").length / 1024)
         : 0;
-      console.log(
+      console.warn(
         `[Scan] Response size: ${responseSizeMB}MB ` +
         `(desktop screenshot: ${desktopScreenshotKB}KB, mobile: ${mobileScreenshotKB}KB, ` +
         `rawViolations: ${Math.round((desktopResult.rawViolations.length + mobileResult.rawViolations.length) / 1024)}KB)`,
