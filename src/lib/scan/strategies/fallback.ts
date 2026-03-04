@@ -88,6 +88,21 @@ export class FallbackStrategy implements ScanStrategy {
         const isScanBlocked = err instanceof ScanBlockedError;
         const msg = err instanceof Error ? err.message : String(err);
 
+        // Browserless API errors (quota, auth) are infrastructure issues,
+        // not WAF blocks. Don't escalate to BQL — it uses the same token.
+        const isBrowserlessApiError =
+          msg.includes("401 Unauthorized") ||
+          msg.includes("units usage limit") ||
+          msg.includes("403 Forbidden") ||
+          msg.includes("authentication failed");
+
+        if (isBrowserlessApiError) {
+          throw new Error(
+            "Scanner service temporarily unavailable — cloud browser quota exceeded. " +
+            "Please try again later or contact support.",
+          );
+        }
+
         this.wafBlockedUrls.add(url);
         if (!isScanBlocked) {
           this.baasDisabled = true;
@@ -99,6 +114,8 @@ export class FallbackStrategy implements ScanStrategy {
           isScanBlocked ? "WAF blocked" : msg,
         );
       }
+    } else if (this.baasDisabled && !this.wafBlockedUrls.has(url)) {
+      scanLog.bqlEscalation(url, "baas_skipped", "BaaS disabled due to connection error");
     } else {
       scanLog.bqlEscalation(url, "baas_skipped", "URL already known WAF-blocked");
     }

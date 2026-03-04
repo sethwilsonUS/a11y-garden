@@ -281,7 +281,13 @@ export const updateAuditWithResults = mutation({
       ) {
         const reused: Record<string, unknown> = {};
 
-        if (previous.aiSummary) {
+        // Only reuse AI results when platform context hasn't changed.
+        // If the new audit detected a platform but the cached result has no
+        // platformTip, the AI summary needs regeneration with platform context.
+        const needsPlatformRegen =
+          !!args.platform && previous.aiSummary && !previous.platformTip;
+
+        if (previous.aiSummary && !needsPlatformRegen) {
           reused.aiSummary = previous.aiSummary;
           reused.topIssues = previous.topIssues;
           if (previous.platformTip) reused.platformTip = previous.platformTip;

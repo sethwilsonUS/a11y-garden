@@ -259,6 +259,7 @@ export async function POST(request: NextRequest) {
     const errorMessage =
       error instanceof Error ? error.message : "Unknown error occurred";
     scanLog.scanFailed("(unknown)", "unknown", errorMessage);
-    return NextResponse.json({ error: errorMessage }, { status: 500 });
+    const status = errorMessage.includes("quota exceeded") ? 503 : 500;
+    return NextResponse.json({ error: errorMessage }, { status });
   }
 }
