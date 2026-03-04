@@ -124,6 +124,31 @@ export function ScanForm() {
     : scanStatus;
   const showWafBanner = serverWaf || isLikelyWaf;
 
+  // When the Convex subscription shows the audit is complete, interrupt
+  // VoiceOver's queued polite progress announcements and stop the timer.
+  const prevAuditStatus = useRef(auditProgress?.status);
+  useEffect(() => {
+    const prev = prevAuditStatus.current;
+    prevAuditStatus.current = auditProgress?.status;
+    if (auditProgress?.status === "complete" && prev && prev !== "complete") {
+      stopProgress();
+      setIsSubmitting(false);
+      setActiveAuditId(null);
+      const el = document.createElement("div");
+      el.setAttribute("aria-live", "assertive");
+      el.setAttribute("aria-atomic", "true");
+      el.className = "sr-only";
+      el.style.cssText =
+        "position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)";
+      document.body.appendChild(el);
+      requestAnimationFrame(() => {
+        const total = auditProgress.violations?.total ?? 0;
+        el.textContent = `Scan complete. ${total} accessibility ${total === 1 ? "issue" : "issues"} found.`;
+      });
+      setTimeout(() => el.remove(), 5_000);
+    }
+  }, [auditProgress?.status, auditProgress?.violations?.total, stopProgress]);
+
   // Track in-flight scan so the visibilitychange handler can recover
   const scanRef = useRef<{ auditId: string; resultsUrl: string } | null>(null);
 
