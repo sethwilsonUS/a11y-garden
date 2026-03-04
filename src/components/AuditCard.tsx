@@ -16,7 +16,7 @@ interface AuditCardProps {
     letterGrade: "A" | "B" | "C" | "D" | "F";
     score: number;
     gradingVersion?: number;
-    scanMode?: "full" | "safe";
+    scanMode?: "full" | "safe" | "jsdom-structural";
     violations: {
       critical: number;
       serious: number;

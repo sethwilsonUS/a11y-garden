@@ -39,7 +39,7 @@ export interface ReportData {
     minor: number;
     total: number;
   };
-  scanMode?: "full" | "safe";
+  scanMode?: "full" | "safe" | "jsdom-structural";
   rawViolations?: string;
   /** Detected website platform/CMS slug (e.g. "wordpress") */
   platform?: string;
@@ -55,7 +55,7 @@ export interface ReportData {
   };
   mobileLetterGrade?: string;
   mobileScore?: number;
-  mobileScanMode?: "full" | "safe";
+  mobileScanMode?: "full" | "safe" | "jsdom-structural";
   mobileRawViolations?: string;
   mobileTruncated?: boolean;
   mobileAiSummary?: string;

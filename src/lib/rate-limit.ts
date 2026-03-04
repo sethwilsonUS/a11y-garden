@@ -16,12 +16,22 @@ const isRateLimitEnabled =
 
 const redis = isRateLimitEnabled ? Redis.fromEnv() : null;
 
-// Per-IP rate limiter: 20 scans per hour, sliding window
-const ratelimit = redis
+// Per-IP rate limiter: 10 scans per hour for anonymous users
+const anonRatelimit = redis
   ? new Ratelimit({
       redis,
-      limiter: Ratelimit.slidingWindow(20, "1 h"),
-      prefix: "scan-ratelimit",
+      limiter: Ratelimit.slidingWindow(10, "1 h"),
+      prefix: "scan-ratelimit-anon",
+      analytics: true,
+    })
+  : null;
+
+// Per-user rate limiter: 30 scans per hour for authenticated users
+const userRatelimit = redis
+  ? new Ratelimit({
+      redis,
+      limiter: Ratelimit.slidingWindow(30, "1 h"),
+      prefix: "scan-ratelimit-user",
       analytics: true,
     })
   : null;
@@ -49,18 +59,24 @@ export interface RateLimitResult {
 }
 
 /**
- * Check per-IP rate limit.  Returns `{ allowed: true }` when rate limiting
- * is disabled (local dev without RATE_LIMIT_ENABLED).
+ * Check rate limit. Uses per-user limit (30/hr) for authenticated users,
+ * per-IP limit (10/hr) for anonymous. Returns `{ allowed: true }` when
+ * rate limiting is disabled (local dev without RATE_LIMIT_ENABLED).
  */
-export async function checkRateLimit(ip: string): Promise<RateLimitResult> {
-  if (!ratelimit) {
+export async function checkRateLimit(
+  ip: string,
+  userId?: string | null,
+): Promise<RateLimitResult> {
+  const limiter = userId ? userRatelimit : anonRatelimit;
+  const key = userId ?? ip;
+
+  if (!limiter) {
     return { allowed: true };
   }
 
   const { success, limit, remaining, reset, pending } =
-    await ratelimit.limit(ip);
+    await limiter.limit(key);
 
-  // Fire-and-forget analytics write
   pending.catch(() => {});
 
   return { allowed: success, limit, remaining, reset };

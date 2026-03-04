@@ -41,7 +41,8 @@ try {
 import { Command } from "commander";
 import chalk from "chalk";
 import ora from "ora";
-import { scanUrl, scanUrlDual, ScanBlockedError } from "@/lib/scanner";
+import { scanUrl, scanUrlDual, ScanBlockedError, type ScanResult, type DualScanResult } from "@/lib/scanner";
+import { createScanStrategy, type StrategyScanResult } from "@/lib/scan/strategies";
 import { PLATFORM_LABELS } from "@/lib/platforms";
 import { calculateGrade, calculateCombinedGrade } from "@/lib/grading";
 import {
@@ -119,6 +120,14 @@ function formatTerminalReport(data: ReportData): string {
     lines.push("");
     lines.push(
       chalk.yellow("  ⚠ Safe Mode — not all checks were performed."),
+    );
+  } else if (data.scanMode === "jsdom-structural") {
+    lines.push("");
+    lines.push(
+      chalk.cyan("  ℹ Structural scan — site firewall required server-side analysis."),
+    );
+    lines.push(
+      chalk.cyan("    Color contrast and interactive element checks were skipped."),
     );
   }
 
@@ -266,6 +275,55 @@ function formatTerminalReport(data: ReportData): string {
 }
 
 // ---------------------------------------------------------------------------
+// Strategy result → scanner types adapters
+// ---------------------------------------------------------------------------
+
+function strategyResultToScanResult(res: StrategyScanResult): ScanResult {
+  return {
+    violations: res.violations,
+    rawViolations: res.rawViolations,
+    pageTitle: res.pageTitle ?? "",
+    safeMode: res.scanMode.mode !== "full",
+    truncated: res.truncated,
+    screenshot: res.screenshot,
+    screenshotWarning: res.screenshotWarning,
+    platform: res.platform,
+    warning: res.warning,
+    scanModeInfo: res.scanMode,
+  };
+}
+
+function strategyResultsToDualResult(
+  desktop: StrategyScanResult,
+  mobile: StrategyScanResult,
+): DualScanResult {
+  return {
+    desktop: {
+      violations: desktop.violations,
+      rawViolations: desktop.rawViolations,
+      safeMode: desktop.scanMode.mode !== "full",
+      truncated: desktop.truncated,
+      screenshot: desktop.screenshot,
+      screenshotWarning: desktop.screenshotWarning,
+      warning: desktop.warning,
+      scanModeInfo: desktop.scanMode,
+    },
+    mobile: {
+      violations: mobile.violations,
+      rawViolations: mobile.rawViolations,
+      safeMode: mobile.scanMode.mode !== "full",
+      truncated: mobile.truncated,
+      screenshot: mobile.screenshot,
+      screenshotWarning: mobile.screenshotWarning,
+      warning: mobile.warning,
+      scanModeInfo: mobile.scanMode,
+    },
+    pageTitle: desktop.pageTitle ?? "",
+    platform: desktop.platform,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // CLI
 // ---------------------------------------------------------------------------
 
@@ -308,79 +366,103 @@ program
         console.error(chalk.green.bold("\n  🌱 A11y Garden CLI\n"));
       }
 
-      // ---- Build browser WS endpoint (mirrors API route logic) ---------------
-      // Uses BROWSERLESS_URL / BROWSERLESS_TOKEN from env (.env.local) when
-      // available, so the CLI produces identical results to the web UI.
-      // --local flag skips this and forces local Playwright.
-      let browserWSEndpoint: string | undefined;
-      if (!options.local) {
-        const browserlessUrl = process.env.BROWSERLESS_URL;
-        const browserlessToken = process.env.BROWSERLESS_TOKEN;
-        if (browserlessUrl) {
-          browserWSEndpoint = browserlessToken
-            ? `${browserlessUrl}?token=${browserlessToken}`
-            : browserlessUrl;
-        }
-      }
-
       // ---- Scan -------------------------------------------------------------
-      const usingRemote = !!browserWSEndpoint;
-      const spinner = ora({
-        text: `Scanning ${chalk.cyan(url)}${usingRemote ? chalk.dim(" (via Browserless)") : ""}...`,
-        stream: process.stderr,
-      }).start();
-
       const wantsScreenshot = options.screenshot !== undefined && options.screenshot !== false;
-
-      let scanResult;
-      let dualResult;
       const desktopOnly = !!options.desktopOnly;
 
-      try {
-        if (desktopOnly) {
-          scanResult = await scanUrl(url, {
-            captureScreenshot: wantsScreenshot,
-            browserWSEndpoint,
-          });
-        } else {
-          dualResult = await scanUrlDual(url, {
-            captureScreenshot: wantsScreenshot,
-            browserWSEndpoint,
-          });
-        }
-      } catch (error) {
-        if (error instanceof ScanBlockedError) {
-          spinner.fail(
-            `Site's firewall blocked the scan (HTTP ${error.httpStatus})`,
+      let scanResult: ScanResult | undefined;
+      let dualResult: DualScanResult | undefined;
+
+      if (options.local) {
+        // --local flag: direct Playwright scan (bypass strategy system,
+        // ignore BROWSERLESS_URL, use pure local Playwright)
+        const spinner = ora({
+          text: `Scanning ${chalk.cyan(url)}...`,
+          stream: process.stderr,
+        }).start();
+
+        try {
+          if (desktopOnly) {
+            scanResult = await scanUrl(url, { captureScreenshot: wantsScreenshot });
+          } else {
+            dualResult = await scanUrlDual(url, { captureScreenshot: wantsScreenshot });
+          }
+          spinner.succeed(
+            desktopOnly
+              ? `Page loaded: ${chalk.white.bold(`"${scanResult!.pageTitle || "Untitled"}"`)}` +
+                (scanResult!.safeMode ? chalk.yellow(" (safe mode)") : "")
+              : `Page loaded: ${chalk.white.bold(`"${dualResult!.pageTitle || "Untitled"}"`)}` +
+                (dualResult!.desktop.safeMode ? chalk.yellow(" (desktop: safe mode)") : "") +
+                (dualResult!.mobile.safeMode ? chalk.yellow(" (mobile: safe mode)") : ""),
           );
-          console.error(
-            chalk.yellow(
-              "  This site's WAF prevented automated scanning. Try a different URL.\n",
-            ),
-          );
+        } catch (error) {
+          if (error instanceof ScanBlockedError) {
+            spinner.fail(`Site's firewall blocked the scan (HTTP ${error.httpStatus})`);
+            console.error(chalk.yellow("  This site's WAF prevented automated scanning. Try a different URL.\n"));
+            process.exit(1);
+          }
+          spinner.fail("Scan failed");
+          console.error(chalk.red(`  ${error instanceof Error ? error.message : "Unknown error"}\n`));
           process.exit(1);
         }
-        spinner.fail("Scan failed");
-        console.error(
-          chalk.red(
-            `  ${error instanceof Error ? error.message : "Unknown error"}\n`,
-          ),
-        );
-        process.exit(1);
-      }
+      } else {
+        // Use strategy factory (respects SCAN_STRATEGY env var, auto-detects otherwise)
+        const strategy = await createScanStrategy();
+        const strategyLabel =
+          strategy.name === "bql-jsdom" ? " (BQL stealth)" :
+          strategy.name === "playwright-baas" ? " (via Browserless)" :
+          strategy.name === "playwright-local" && process.env.BROWSERLESS_URL ? " (via Docker)" : "";
 
-      // Normalize to a single-viewport result for desktop-only mode
-      if (desktopOnly && scanResult) {
-        spinner.succeed(
-          `Page loaded: ${chalk.white.bold(`"${scanResult.pageTitle || "Untitled"}"`)}` +
-            (scanResult.safeMode ? chalk.yellow(" (safe mode)") : ""),
-        );
-      } else if (dualResult) {
-        spinner.succeed(
-          `Page loaded: ${chalk.white.bold(`"${dualResult.pageTitle || "Untitled"}"`)}` +
-            (dualResult.desktop.safeMode ? chalk.yellow(" (desktop: safe mode)") : "") +
-            (dualResult.mobile.safeMode ? chalk.yellow(" (mobile: safe mode)") : ""),
-        );
+        const spinner = ora({
+          text: `Scanning ${chalk.cyan(url)}${chalk.dim(strategyLabel)}...`,
+          stream: process.stderr,
+        }).start();
+
+        try {
+          const strategyOpts = {
+            captureScreenshot: wantsScreenshot,
+            timeBudgetMs: 120_000,
+            isAuthenticated: false,
+          };
+
+          const desktopRes = await strategy.scan(url, { ...strategyOpts, viewport: "desktop" as const });
+
+          if (desktopOnly) {
+            scanResult = strategyResultToScanResult(desktopRes);
+          } else {
+            const mobileRes = await strategy.scan(url, { ...strategyOpts, viewport: "mobile" as const });
+            dualResult = strategyResultsToDualResult(desktopRes, mobileRes);
+          }
+
+          const modeSuffix = (res: StrategyScanResult) =>
+            res.scanMode.mode === "jsdom-structural"
+              ? chalk.cyan(" (structural scan)")
+              : res.scanMode.mode === "safe-rules"
+                ? chalk.yellow(" (safe mode)")
+                : "";
+
+          spinner.succeed(
+            desktopOnly
+              ? `Page loaded: ${chalk.white.bold(`"${scanResult!.pageTitle || "Untitled"}"`)}` + modeSuffix(desktopRes)
+              : `Page loaded: ${chalk.white.bold(`"${dualResult!.pageTitle || "Untitled"}"`)}` + modeSuffix(desktopRes),
+          );
+        } catch (error) {
+          if (error instanceof ScanBlockedError) {
+            spinner.fail(`Site's firewall blocked the scan (HTTP ${error.httpStatus})`);
+            if (strategy.name !== "bql-jsdom") {
+              console.error(chalk.yellow(
+                "  Try setting SCAN_STRATEGY=bql to bypass the WAF:\n" +
+                `  ${chalk.dim("SCAN_STRATEGY=bql")} npm run cli -- ${rawUrl}\n`,
+              ));
+            } else {
+              console.error(chalk.yellow("  BQL stealth could not bypass this site's firewall.\n"));
+            }
+            process.exit(1);
+          }
+          spinner.fail("Scan failed");
+          console.error(chalk.red(`  ${error instanceof Error ? error.message : "Unknown error"}\n`));
+          process.exit(1);
+        }
       }
 
       // ---- Screenshot (optional) ---------------------------------------------
@@ -469,7 +551,11 @@ program
 
       // ---- Build report data ------------------------------------------------
       const desktopSafeMode = desktopOnly ? scanResult!.safeMode : dualResult!.desktop.safeMode;
-      
+      const desktopScanModeInfo = desktopOnly ? scanResult!.scanModeInfo : dualResult!.desktop.scanModeInfo;
+      const desktopScanMode = desktopScanModeInfo
+        ? (desktopScanModeInfo.mode === "safe-rules" ? "safe" : desktopScanModeInfo.mode)
+        : (desktopSafeMode ? "safe" : "full");
+
       const reportData: ReportData = {
         url,
         pageTitle: desktopOnly ? scanResult!.pageTitle : dualResult!.pageTitle,
@@ -477,7 +563,7 @@ program
         score: primaryScore,
         scannedAt: Date.now(),
         violations: desktopViolations,
-        scanMode: desktopSafeMode ? "safe" : "full",
+        scanMode: desktopScanMode as ReportData["scanMode"],
         rawViolations: desktopRawViolations,
         ...(aiSummary !== undefined && { aiSummary }),
         ...(topIssues !== undefined && { topIssues }),
@@ -488,7 +574,11 @@ program
           mobileViolations: dualResult.mobile.violations,
           mobileLetterGrade: mobileGradeResult!.grade,
           mobileScore: mobileGradeResult!.score,
-          mobileScanMode: (dualResult.mobile.safeMode ? "safe" : "full") as "full" | "safe",
+          mobileScanMode: (() => {
+            const info = dualResult.mobile.scanModeInfo;
+            if (info) return info.mode === "safe-rules" ? "safe" as const : info.mode;
+            return dualResult.mobile.safeMode ? "safe" as const : "full" as const;
+          })(),
           mobileRawViolations: dualResult.mobile.rawViolations,
           ...(dualResult.mobile.truncated && { mobileTruncated: true }),
         } : {}),
@@ -532,6 +622,10 @@ program
         
         // Print mobile section if dual scan
         if (!desktopOnly && dualResult && mobileGradeResult) {
+          const mobileInfo = dualResult.mobile.scanModeInfo;
+          const mobileMode = mobileInfo
+            ? (mobileInfo.mode === "safe-rules" ? "safe" : mobileInfo.mode)
+            : (dualResult.mobile.safeMode ? "safe" : "full");
           const mobileReportData: ReportData = {
             url,
             pageTitle: dualResult.pageTitle,
@@ -539,7 +633,7 @@ program
             score: mobileGradeResult.score,
             scannedAt: Date.now(),
             violations: dualResult.mobile.violations,
-            scanMode: dualResult.mobile.safeMode ? "safe" : "full",
+            scanMode: mobileMode as ReportData["scanMode"],
             rawViolations: dualResult.mobile.rawViolations,
           };
           console.log(chalk.bold("\n  ── Mobile Viewport (390×844) ──\n"));

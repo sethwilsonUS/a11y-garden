@@ -37,10 +37,28 @@ export default defineSchema({
 
     // Scan mode indicator
     // "full" = all axe-core rules ran successfully
-    // "safe" = fell back to curated safe rules due to site complexity (see safeRules in route.ts)
+    // "safe" = fell back to curated safe rules due to site complexity
+    // "jsdom-structural" = BQL WAF bypass + JSDOM (structural rules only)
     scanMode: v.optional(
-      v.union(v.literal("full"), v.literal("safe"))
+      v.union(v.literal("full"), v.literal("safe"), v.literal("jsdom-structural"))
     ),
+
+    // JSON-serialized ScanModeInfo — detailed skip reporting (rules run, skipped categories)
+    scanModeDetail: v.optional(v.string()),
+
+    // Strategy metadata — which path was used and WAF detection info
+    scanStrategy: v.optional(
+      v.union(
+        v.literal("baas"),
+        v.literal("bql-stealth"),
+        v.literal("bql-proxy"),
+        v.literal("failed"),
+      ),
+    ),
+    wafDetected: v.optional(v.boolean()),
+    wafType: v.optional(v.string()),
+    wafBypassed: v.optional(v.boolean()),
+    scanDurationMs: v.optional(v.number()),
 
     // Set when the raw violations payload was trimmed to fit the 500 KB cap
     truncated: v.optional(v.boolean()),
@@ -71,7 +89,8 @@ export default defineSchema({
     mobileScore: v.optional(v.number()),
     mobileRawViolations: v.optional(v.string()),
     mobileScreenshotId: v.optional(v.id("_storage")),
-    mobileScanMode: v.optional(v.union(v.literal("full"), v.literal("safe"))),
+    mobileScanMode: v.optional(v.union(v.literal("full"), v.literal("safe"), v.literal("jsdom-structural"))),
+    mobileScanModeDetail: v.optional(v.string()),
     mobileTruncated: v.optional(v.boolean()),
     mobileAiSummary: v.optional(v.string()),
     mobileTopIssues: v.optional(v.array(v.string())),
@@ -86,6 +105,9 @@ export default defineSchema({
     // Agent plan (AGENTS.md) stored in Convex file storage
     agentPlanFileId: v.optional(v.id("_storage")),
     agentPlanGeneratedAt: v.optional(v.number()),
+
+    // robots.txt advisory — true if the scanned path was disallowed
+    robotsDisallowed: v.optional(v.boolean()),
 
     // Error handling
     errorMessage: v.optional(v.string()),
@@ -105,4 +127,14 @@ export default defineSchema({
     savedAudits: v.array(v.id("audits")),
     emailNotifications: v.boolean(),
   }).index("by_userId", ["userId"]),
+
+  domainStrategies: defineTable({
+    domain: v.string(),
+    strategy: v.union(v.literal("baas"), v.literal("bql")),
+    wafType: v.optional(v.string()),
+    lastScanned: v.number(),
+    successRate: v.number(),
+    adaptiveServing: v.optional(v.boolean()),
+    adaptiveReason: v.optional(v.string()),
+  }).index("by_domain", ["domain"]),
 });
