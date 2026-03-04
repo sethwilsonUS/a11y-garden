@@ -8,7 +8,7 @@ function makeOpts(
   return {
     viewport: "desktop",
     captureScreenshot: false,
-    timeBudgetMs: 55_000,
+    timeBudgetMs: 240_000,
     isAuthenticated: true,
     ...overrides,
   };

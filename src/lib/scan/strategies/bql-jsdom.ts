@@ -69,6 +69,13 @@ const ESCALATION_CHAIN: EscalationStep[] = [
     humanlike: true,
     postGoto: "wait-nav-long",
   },
+  {
+    label: "stealth + proxy + Cloudflare verify",
+    verify: true,
+    proxy: true,
+    humanlike: true,
+    postGoto: "immediate",
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -78,7 +85,7 @@ const ESCALATION_CHAIN: EscalationStep[] = [
 const MAX_RETRIES = 2;
 const INITIAL_BACKOFF_MS = 1_000;
 
-const DEFAULT_BQL_TIMEOUT_MS = 30_000;
+const DEFAULT_BQL_TIMEOUT_MS = 90_000;
 
 async function callBql(
   query: string,
@@ -164,16 +171,16 @@ function buildBqlQuery(
       : '';
 
   const desktopScreenshotLine = queryOpts.screenshot && !isMobileDevice
-    ? '\n  desktopScreenshot: screenshot(fullPage: false, type: jpeg, quality: 80) { base64 }'
+    ? '\n  desktopScreenshot: screenshot(fullPage: false, type: jpeg, quality: 90) { base64 }'
     : '';
 
   const mobileScreenshotLine = queryOpts.screenshot && !isMobileDevice
     ? `\n  mobileVp: viewport(width: ${MOBILE_VP.width}, height: ${MOBILE_VP.height}) { time }` +
-      '\n  mobileScreenshot: screenshot(fullPage: false, type: jpeg, quality: 80) { base64 }'
+      '\n  mobileScreenshot: screenshot(fullPage: false, type: jpeg, quality: 90) { base64 }'
     : '';
 
   const singleScreenshotLine = queryOpts.screenshot && isMobileDevice
-    ? '\n  screenshot(fullPage: false, type: jpeg, quality: 80) { base64 }'
+    ? '\n  screenshot(fullPage: false, type: jpeg, quality: 90) { base64 }'
     : '';
 
   // Use ~40% of the step's time budget for the navigation wait, clamped to [8s, 20s]

@@ -21,8 +21,8 @@ import {
 import { scanLog } from "@/lib/scan/monitoring/scan-logger";
 import { checkRobotsTxt } from "@/lib/robots-check";
 
-// Vercel Pro allows up to 60s for serverless functions
-export const maxDuration = 60;
+// Vercel Pro allows up to 300s for serverless functions
+export const maxDuration = 300;
 
 /**
  * Map ScanModeInfo.mode to the DB/API scanMode field.
@@ -141,7 +141,7 @@ export async function POST(request: NextRequest) {
 
       const strategyOpts: Omit<ScanStrategyOptions, "viewport"> = {
         captureScreenshot: true,
-        timeBudgetMs: 55_000,
+        timeBudgetMs: 240_000,
         isAuthenticated,
       };
 

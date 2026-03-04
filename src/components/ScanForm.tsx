@@ -9,28 +9,44 @@ import { buildResultsUrl } from "@/lib/urls";
 import { track } from "@/lib/analytics";
 
 const SCAN_PROGRESS_STEPS: [number, string][] = [
+  // Phase 1: Setup (0-5s)
   [0, "Checking rate limits…"],
   [1_000, "Validating URL…"],
   [2_000, "Checking robots.txt…"],
-  [3_000, "Connecting to browser…"],
+  [3_000, "Connecting to scanner…"],
+  // Phase 2: Normal scan (5-30s)
   [5_000, "Loading page (desktop)…"],
   [10_000, "Running accessibility scan (desktop)…"],
-  [15_000, "Capturing screenshot (desktop)…"],
-  [18_000, "Loading page (mobile)…"],
-  [22_000, "Running accessibility scan (mobile)…"],
-  [26_000, "Capturing screenshot (mobile)…"],
-  [32_000, "Still working — complex sites take longer…"],
-  [42_000, "Almost there — finalizing scan…"],
-  [52_000, "Wrapping up — this site is taking a while…"],
+  [15_000, "Capturing screenshots…"],
+  [20_000, "Loading page (mobile)…"],
+  [25_000, "Running accessibility scan (mobile)…"],
+  // Phase 3: WAF bypass likely in progress (30s+)
+  [35_000, "Taking longer than usual — firewall bypass may be in progress…"],
+  [50_000, "WAF bypass active — trying stealth approach…"],
+  [70_000, "Still working — trying extended navigation…"],
+  [100_000, "Escalating WAF bypass strategy…"],
+  [130_000, "Still working — complex firewalls can take a few minutes…"],
+  [180_000, "Almost there — finalizing bypass…"],
+  [220_000, "Wrapping up…"],
 ];
+
+const WAF_WARNING_THRESHOLD_MS = 30_000;
 
 function useScanProgress() {
   const [status, setStatus] = useState("");
+  const [elapsedMs, setElapsedMs] = useState(0);
+  const [isLikelyWaf, setIsLikelyWaf] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const startTimeRef = useRef<number>(0);
   const manualRef = useRef(false);
 
   const startProgress = useCallback(() => {
     manualRef.current = false;
+    setIsLikelyWaf(false);
+    setElapsedMs(0);
+    startTimeRef.current = Date.now();
+
     for (const [delay, message] of SCAN_PROGRESS_STEPS) {
       timerRef.current.push(
         setTimeout(() => {
@@ -38,6 +54,14 @@ function useScanProgress() {
         }, delay),
       );
     }
+
+    timerRef.current.push(
+      setTimeout(() => setIsLikelyWaf(true), WAF_WARNING_THRESHOLD_MS),
+    );
+
+    intervalRef.current = setInterval(() => {
+      setElapsedMs(Date.now() - startTimeRef.current);
+    }, 1_000);
   }, []);
 
   const setManualStatus = useCallback((msg: string) => {
@@ -48,13 +72,19 @@ function useScanProgress() {
   const stopProgress = useCallback(() => {
     for (const t of timerRef.current) clearTimeout(t);
     timerRef.current = [];
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
     manualRef.current = false;
     setStatus("");
+    setElapsedMs(0);
+    setIsLikelyWaf(false);
   }, []);
 
   useEffect(() => stopProgress, [stopProgress]);
 
-  return { status, startProgress, setManualStatus, stopProgress };
+  return { status, elapsedMs, isLikelyWaf, startProgress, setManualStatus, stopProgress };
 }
 
 export function ScanForm() {
@@ -66,7 +96,7 @@ export function ScanForm() {
     retryAfter?: number;
   } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const { status: scanStatus, startProgress, setManualStatus: setScanStatus, stopProgress } = useScanProgress();
+  const { status: scanStatus, elapsedMs, isLikelyWaf, startProgress, setManualStatus: setScanStatus, stopProgress } = useScanProgress();
   const createAudit = useMutation(api.audits.createAudit);
   const updateAuditStatus = useMutation(api.audits.updateAuditStatus);
   const updateAuditWithResults = useMutation(api.audits.updateAuditWithResults);
@@ -456,15 +486,49 @@ export function ScanForm() {
             <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
           </svg>
-          <span className="transition-opacity duration-200">
-            {scanStatus || "Processing..."}
+          <span className="transition-opacity duration-200 flex items-center gap-2">
+            <span>{scanStatus || "Processing..."}</span>
+            {elapsedMs >= 5_000 && (
+              <span className="text-xs opacity-60 tabular-nums">
+                {Math.floor(elapsedMs / 60_000) > 0
+                  ? `${Math.floor(elapsedMs / 60_000)}m ${Math.floor((elapsedMs % 60_000) / 1_000)}s`
+                  : `${Math.floor(elapsedMs / 1_000)}s`}
+              </span>
+            )}
           </span>
         </span>
       </button>
 
+      {isSubmitting && isLikelyWaf && (
+        <div
+          className="mt-3 p-3 rounded-lg bg-blue-50 dark:bg-blue-950/40 border border-blue-300 dark:border-blue-700 text-blue-800 dark:text-blue-200 text-sm flex items-start gap-2.5 animate-in fade-in slide-in-from-top-2 duration-300"
+          role="status"
+        >
+          <svg className="w-5 h-5 flex-shrink-0 mt-0.5 text-blue-500" fill="currentColor" viewBox="0 0 20 20" aria-hidden="true">
+            <path
+              fillRule="evenodd"
+              d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.253a.25.25 0 01.244.304l-.459 2.066A1.75 1.75 0 0010.747 15H11a.75.75 0 000-1.5h-.253a.25.25 0 01-.244-.304l.459-2.066A1.75 1.75 0 009.253 9H9z"
+              clipRule="evenodd"
+            />
+          </svg>
+          <div>
+            <p className="font-medium">This site may be behind a firewall</p>
+            <p className="mt-1 text-blue-700 dark:text-blue-300/80">
+              We&apos;re automatically trying to bypass it. WAF-protected sites can take up to 4 minutes to scan.
+              You can leave this tab open — results will appear when ready.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Live region for screen reader scan-progress announcements */}
       <div className="sr-only" aria-live="assertive" aria-atomic="true">
         {isSubmitting ? scanStatus || "Scan in progress…" : ""}
+      </div>
+      <div className="sr-only" aria-live="polite">
+        {isSubmitting && isLikelyWaf
+          ? "This site appears to be behind a firewall. Bypass in progress — this can take up to 4 minutes."
+          : ""}
       </div>
     </form>
   );
