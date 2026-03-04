@@ -103,8 +103,9 @@ export class FallbackStrategy implements ScanStrategy {
           );
         }
 
-        this.wafBlockedUrls.add(url);
-        if (!isScanBlocked) {
+        if (isScanBlocked) {
+          this.wafBlockedUrls.add(url);
+        } else {
           this.baasDisabled = true;
         }
 
@@ -120,10 +121,15 @@ export class FallbackStrategy implements ScanStrategy {
       scanLog.bqlEscalation(url, "baas_skipped", "URL already known WAF-blocked");
     }
 
-    // Step 2: Auth gate — BQL burns cloud units, require sign-in
+    // Step 2: Auth gate — BQL burns cloud units, require sign-in.
+    // Distinguish actual WAF blocks from generic BaaS failures so anonymous
+    // users aren't told a site has a firewall when it doesn't.
     if (!opts.isAuthenticated) {
+      const isActualWaf = this.wafBlockedUrls.has(url);
       throw new ScanBlockedError(
-        "This site's firewall blocked our scanner. Sign in to unlock firewall bypass.",
+        isActualWaf
+          ? "This site's firewall blocked our scanner. Sign in to unlock firewall bypass."
+          : "This site couldn't be scanned from our cloud service. Sign in to try an alternative scanning method.",
         "",
         403,
         true,

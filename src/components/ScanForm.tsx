@@ -183,9 +183,9 @@ export function ScanForm() {
           reason: scanResult.requiresAuth ? "waf_auth_required" : "waf",
         });
         setRateLimitInfo({
-          message: scanResult.requiresAuth
-            ? "This site's firewall blocked our scanner. Sign in to unlock firewall bypass and get results."
-            : "This site's firewall blocked our automated scanner, so we can't produce accurate results. Try a different URL.",
+          message: scanResult.error || (scanResult.requiresAuth
+            ? "This site couldn't be scanned. Sign in to unlock alternative scanning methods."
+            : "This site's firewall blocked our automated scanner, so we can't produce accurate results. Try a different URL."),
         });
         setIsSubmitting(false);
         stopProgress();
