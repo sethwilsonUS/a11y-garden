@@ -9,24 +9,20 @@ import { buildResultsUrl } from "@/lib/urls";
 import { track } from "@/lib/analytics";
 
 const SCAN_PROGRESS_STEPS: [number, string][] = [
-  // Phase 1: Setup (0-5s)
-  [0, "Checking rate limits…"],
-  [1_000, "Validating URL…"],
-  [2_000, "Checking robots.txt…"],
-  [3_000, "Connecting to scanner…"],
-  // Phase 2: Normal scan (5-30s)
-  [5_000, "Loading page (desktop)…"],
-  [10_000, "Running accessibility scan (desktop)…"],
-  [15_000, "Capturing screenshots…"],
-  [20_000, "Loading page (mobile)…"],
-  [25_000, "Running accessibility scan (mobile)…"],
+  // Phase 1: Lightweight server-side checks (0-3s)
+  [0, "Preparing scan…"],
+  [2_000, "Connecting to scanner…"],
+  // Phase 2: Scanning in progress — keep it honest, we don't know specifics (3-30s)
+  [5_000, "Scanning…"],
+  [12_000, "Still scanning…"],
+  [20_000, "Taking a bit longer than usual…"],
   // Phase 3: WAF bypass likely in progress (30s+)
-  [35_000, "Taking longer than usual — firewall bypass may be in progress…"],
-  [50_000, "WAF bypass active — trying stealth approach…"],
-  [70_000, "Still working — trying extended navigation…"],
-  [100_000, "Escalating WAF bypass strategy…"],
+  [35_000, "This site may have a firewall — working on it…"],
+  [50_000, "Firewall bypass in progress…"],
+  [70_000, "Still working through the firewall…"],
+  [100_000, "Trying another bypass approach…"],
   [130_000, "Still working — complex firewalls can take a few minutes…"],
-  [180_000, "Almost there — finalizing bypass…"],
+  [180_000, "Almost there…"],
   [220_000, "Wrapping up…"],
 ];
 
