@@ -13,7 +13,7 @@ import { PLATFORM_LABELS, getPlatformConfidence } from "@/lib/platforms";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { use, useEffect, useRef, useState, useCallback } from "react";
-import { useAuth } from "@clerk/nextjs";
+import { useAuth, SignInButton } from "@clerk/nextjs";
 import { ScanModeBanner } from "@/components/ScanModeBanner";
 import { WafBadge } from "@/components/WafBadge";
 import { ScreenshotSection } from "@/components/ScreenshotSection";
@@ -800,6 +800,30 @@ export default function ResultsPage({
                     <>Bookmark this page to return to it later &mdash; private scans from guests aren&apos;t saved to an account.</>
                   )}
                 </p>
+              </div>
+            </div>
+          )}
+
+          {/* Sign-in CTA for anonymous users */}
+          {!userId && (
+            <div className="rounded-xl p-4 flex items-start gap-3 border border-theme bg-theme-secondary">
+              <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-[var(--btn-primary-bg)] flex items-center justify-center">
+                <svg className="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7H5a2 2 0 00-2 2v9a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-3m-1 4l-3 3m0 0l-3-3m3 3V4" />
+                </svg>
+              </div>
+              <div className="flex-1">
+                <h3 className="text-sm font-semibold text-theme-primary mb-1">
+                  Save Your Bounty
+                </h3>
+                <p className="text-sm text-theme-secondary mb-3">
+                  Sign in to save results to your dashboard, track improvements over time, and share in the community garden.
+                </p>
+                <SignInButton mode="modal">
+                  <button className="btn-primary text-sm py-2 px-4 cursor-pointer">
+                    Sign In to Save
+                  </button>
+                </SignInButton>
               </div>
             </div>
           )}
