@@ -183,7 +183,11 @@ export async function POST(request: NextRequest) {
       };
 
       // ---- Run scans (desktop + mobile) -------------------------------------
-      await emitProgress("Scanning desktop viewport...");
+      if (cachedStrategy === "bql") {
+        await emitProgress("waf:Known firewall — scanning with bypass...");
+      } else {
+        await emitProgress("Scanning desktop viewport...");
+      }
       const desktopResult = await strategy.scan(validation.url, {
         ...strategyOpts,
         viewport: "desktop",
