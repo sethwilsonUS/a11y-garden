@@ -27,6 +27,19 @@ const SCAN_PROGRESS_STEPS: [number, string][] = [
 ];
 
 const WAF_WARNING_THRESHOLD_MS = 30_000;
+const SR_ANNOUNCE_INTERVAL_MS = 10_000;
+
+function formatElapsedSpoken(ms: number): string {
+  const totalSec = Math.floor(ms / 1_000);
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  if (min > 0) {
+    return sec > 0
+      ? `${min} minute${min !== 1 ? "s" : ""} ${sec} seconds`
+      : `${min} minute${min !== 1 ? "s" : ""}`;
+  }
+  return `${sec} seconds`;
+}
 
 function useScanProgress() {
   const [status, setStatus] = useState("");
@@ -239,6 +252,8 @@ export function ScanForm() {
       // Convex by the API route, so no client-side writes are needed.
       scanRef.current = null;
       setActiveAuditId(null);
+      stopProgress();
+      setIsSubmitting(false);
       track("Scan Completed", {
         grade: scanResult.letterGrade,
         score: scanResult.score,
@@ -441,7 +456,7 @@ export function ScanForm() {
           <span className="transition-opacity duration-200 flex items-center gap-2">
             <span>{effectiveStatus || "Processing..."}</span>
             {elapsedMs >= 5_000 && (
-              <span className="text-xs opacity-60 tabular-nums">
+              <span className="text-xs opacity-60 tabular-nums" aria-hidden="true">
                 {Math.floor(elapsedMs / 60_000) > 0
                   ? `${Math.floor(elapsedMs / 60_000)}m ${Math.floor((elapsedMs % 60_000) / 1_000)}s`
                   : `${Math.floor(elapsedMs / 1_000)}s`}
@@ -473,13 +488,14 @@ export function ScanForm() {
         </div>
       )}
 
-      {/* Live region for screen reader scan-progress announcements */}
-      <div className="sr-only" aria-live="assertive" aria-atomic="true">
-        {isSubmitting ? effectiveStatus || "Scan in progress…" : ""}
-      </div>
-      <div className="sr-only" aria-live="polite">
-        {isSubmitting && showWafBanner
-          ? "This site appears to be behind a firewall. Bypass in progress — this can take up to 4 minutes. Your results will be saved automatically."
+      {/* SR progress announcement — quantized to 10s intervals */}
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {isSubmitting
+          ? (() => {
+              const srElapsedMs = Math.floor(elapsedMs / SR_ANNOUNCE_INTERVAL_MS) * SR_ANNOUNCE_INTERVAL_MS;
+              const timeStr = srElapsedMs >= 5_000 ? `, ${formatElapsedSpoken(srElapsedMs)}` : "";
+              return `${effectiveStatus || "Scan in progress…"}${timeStr}`;
+            })()
           : ""}
       </div>
     </form>

@@ -532,6 +532,27 @@ export default function ResultsPage({
     }
   }, [isLegacy, audit, router]);
 
+  // Announce scan completion to interrupt queued polite progress announcements
+  const prevStatusRef = useRef(audit?.status);
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = audit?.status;
+    if (audit?.status === "complete" && prev && prev !== "complete") {
+      const el = document.createElement("div");
+      el.setAttribute("aria-live", "assertive");
+      el.setAttribute("aria-atomic", "true");
+      el.className = "sr-only";
+      el.style.cssText =
+        "position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)";
+      document.body.appendChild(el);
+      requestAnimationFrame(() => {
+        const total = audit.violations.total;
+        el.textContent = `Scan complete. ${total} accessibility ${total === 1 ? "issue" : "issues"} found.`;
+      });
+      setTimeout(() => el.remove(), 5_000);
+    }
+  }, [audit?.status, audit?.violations?.total]);
+
   // Lazy recalculation: update grade if using outdated algorithm
   useEffect(() => {
     if (
