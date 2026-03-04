@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
-import { useMutation, useAction } from "convex/react";
+import { useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { useRouter } from "next/navigation";
 import { Id } from "../../convex/_generated/dataModel";
@@ -95,11 +95,23 @@ export function ScanForm() {
   const { status: scanStatus, elapsedMs, isLikelyWaf, startProgress, setManualStatus: setScanStatus, stopProgress } = useScanProgress();
   const createAudit = useMutation(api.audits.createAudit);
   const updateAuditStatus = useMutation(api.audits.updateAuditStatus);
-  const updateAuditWithResults = useMutation(api.audits.updateAuditWithResults);
   const updateAuditError = useMutation(api.audits.updateAuditError);
-  const analyzeViolations = useAction(api.ai.analyzeViolations);
-  const generateUploadUrl = useMutation(api.audits.generateUploadUrl);
   const router = useRouter();
+
+  // Track in-flight scan so the visibilitychange handler can recover
+  const scanRef = useRef<{ auditId: string; resultsUrl: string } | null>(null);
+
+  useEffect(() => {
+    function onVisibilityChange() {
+      if (document.visibilityState !== "visible") return;
+      const scan = scanRef.current;
+      if (!scan) return;
+      router.push(scan.resultsUrl);
+    }
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () =>
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, [router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -111,7 +123,6 @@ export function ScanForm() {
     // Validate and normalize URL
     let normalizedUrl = url.trim();
     if (!normalizedUrl.startsWith("http://") && !normalizedUrl.startsWith("https://")) {
-      // Use http:// for local addresses (no TLS), https:// for everything else
       const looksLocal = /^(localhost|127\.\d+\.\d+\.\d+|\[::1\])(:\d+)?/i.test(
         normalizedUrl
       );
@@ -130,11 +141,6 @@ export function ScanForm() {
     track("Scan Submitted", { isPublic });
 
     // ---- Self-scan warning (dev only) -----------------------------------------
-    // In development without a remote browser (Browserless), the Next.js dev
-    // server can deadlock when asked to scan its own origin. With Browserless,
-    // the Docker URL rewriting makes it work. We show a warning but allow the
-    // scan — if Browserless is configured it'll succeed, otherwise the user will
-    // see visibly wrong results and know to use the CLI.
     let isSelfScanInDev = false;
     if (process.env.NODE_ENV === "development") {
       try {
@@ -153,14 +159,27 @@ export function ScanForm() {
     }
 
     let auditId: Id<"audits"> | null = null;
+    let resultsUrl: string | null = null;
 
     try {
-      // Step 1: Call the scan API first so rate-limit / capacity rejections
-      //         happen before we create an audit row in Convex.
+      // Step 1: Create the audit in Convex FIRST so the server can persist
+      // results directly — making the scan resilient to mobile tab suspension,
+      // app switching, and screen lock.
+      auditId = await createAudit({
+        url: normalizedUrl,
+        isPublic,
+      });
+      await updateAuditStatus({ auditId, status: "scanning" });
+
+      resultsUrl = buildResultsUrl(normalizedUrl, Date.now(), auditId);
+      scanRef.current = { auditId, resultsUrl };
+
+      // Step 2: Call the scan API with auditId — the server will persist
+      // results to Convex server-side so they survive even if this tab dies.
       const response = await fetch("/api/scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: normalizedUrl }),
+        body: JSON.stringify({ url: normalizedUrl, auditId }),
       });
 
       const scanResult = await response.json();
@@ -173,6 +192,8 @@ export function ScanForm() {
           message: scanResult.error,
           retryAfter: retryAfter ? Number(retryAfter) : undefined,
         });
+        await updateAuditError({ auditId, errorMessage: scanResult.error });
+        scanRef.current = null;
         setIsSubmitting(false);
         stopProgress();
         return;
@@ -182,11 +203,12 @@ export function ScanForm() {
         track("Scan Failed", {
           reason: scanResult.requiresAuth ? "waf_auth_required" : "waf",
         });
-        setRateLimitInfo({
-          message: scanResult.error || (scanResult.requiresAuth
-            ? "This site couldn't be scanned. Sign in to unlock alternative scanning methods."
-            : "This site's firewall blocked our automated scanner, so we can't produce accurate results. Try a different URL."),
-        });
+        const msg = scanResult.error || (scanResult.requiresAuth
+          ? "This site couldn't be scanned. Sign in to unlock alternative scanning methods."
+          : "This site's firewall blocked our automated scanner, so we can't produce accurate results. Try a different URL.");
+        setRateLimitInfo({ message: msg });
+        await updateAuditError({ auditId, errorMessage: msg });
+        scanRef.current = null;
         setIsSubmitting(false);
         stopProgress();
         return;
@@ -196,112 +218,34 @@ export function ScanForm() {
         throw new Error(scanResult.error || "Scan failed");
       }
 
-      // Step 2: Scan succeeded — now create the audit in Convex
-      setScanStatus("Saving results...");
-      auditId = await createAudit({
-        url: normalizedUrl,
-        isPublic,
-      });
-
-      // Warn in console if screenshots appear blank (dev/debugging aid)
-      if (scanResult.desktop?.screenshotWarning) {
-        console.warn("[A11y Garden] Desktop:", scanResult.desktop.screenshotWarning);
-      }
-      if (scanResult.mobile?.screenshotWarning) {
-        console.warn("[A11y Garden] Mobile:", scanResult.mobile.screenshotWarning);
-      }
-
-      // Step 3: Upload screenshots to Convex file storage (desktop + mobile in parallel)
-      const uploadScreenshot = async (base64?: string): Promise<Id<"_storage"> | undefined> => {
-        if (!base64) return undefined;
-        try {
-          const uploadUrl = await generateUploadUrl();
-          const binaryStr = atob(base64);
-          const bytes = new Uint8Array(binaryStr.length);
-          for (let i = 0; i < binaryStr.length; i++) {
-            bytes[i] = binaryStr.charCodeAt(i);
-          }
-          const uploadResp = await fetch(uploadUrl, {
-            method: "POST",
-            headers: { "Content-Type": "image/jpeg" },
-            body: bytes,
-          });
-          if (uploadResp.ok) {
-            const { storageId } = await uploadResp.json();
-            return storageId as Id<"_storage">;
-          }
-        } catch {
-          // Screenshot upload failure shouldn't block saving results
-        }
-        return undefined;
-      };
-
-      const [screenshotId, mobileScreenshotId] = await Promise.all([
-        uploadScreenshot(scanResult.desktop?.screenshotBase64),
-        uploadScreenshot(scanResult.mobile?.screenshotBase64),
-      ]);
-
-      // Step 4: Update Convex with scan results and mark as complete
-      setScanStatus("Finalizing...");
-      await updateAuditStatus({ auditId, status: "scanning" });
-      await updateAuditWithResults({
-        auditId,
-        violations: scanResult.desktop.violations,
-        letterGrade: scanResult.letterGrade,
-        score: scanResult.score,
-        gradingVersion: scanResult.gradingVersion,
-        rawViolations: scanResult.desktop.rawViolations,
-        status: "complete",
-        scanMode: scanResult.desktop.scanMode ?? (scanResult.desktop.safeMode ? "safe" : "full"),
-        ...(scanResult.desktop.scanModeDetail
-          ? { scanModeDetail: JSON.stringify(scanResult.desktop.scanModeDetail) }
-          : {}),
-        ...(scanResult.scanStrategy ? { scanStrategy: scanResult.scanStrategy } : {}),
-        ...(scanResult.wafDetected != null ? { wafDetected: scanResult.wafDetected } : {}),
-        ...(scanResult.wafType ? { wafType: scanResult.wafType } : {}),
-        ...(scanResult.wafBypassed != null ? { wafBypassed: scanResult.wafBypassed } : {}),
-        ...(scanResult.scanDurationMs != null ? { scanDurationMs: scanResult.scanDurationMs } : {}),
-        ...(scanResult.pageTitle ? { pageTitle: scanResult.pageTitle } : {}),
-        ...(scanResult.desktop.truncated ? { truncated: true } : {}),
-        ...(screenshotId ? { screenshotId } : {}),
-        ...(scanResult.platform ? { platform: scanResult.platform } : {}),
-        ...(scanResult.mobile ? {
-          mobileViolations: scanResult.mobile.violations,
-          mobileLetterGrade: scanResult.mobile.letterGrade,
-          mobileScore: scanResult.mobile.score,
-          mobileRawViolations: scanResult.mobile.rawViolations,
-          mobileScanMode: scanResult.mobile.scanMode ?? (scanResult.mobile.safeMode ? ("safe" as const) : ("full" as const)),
-          ...(scanResult.mobile.scanModeDetail
-            ? { mobileScanModeDetail: JSON.stringify(scanResult.mobile.scanModeDetail) }
-            : {}),
-          ...(scanResult.mobile.truncated ? { mobileTruncated: true } : {}),
-          ...(mobileScreenshotId ? { mobileScreenshotId } : {}),
-        } : {}),
-        ...(scanResult.robotsDisallowed ? { robotsDisallowed: true } : {}),
-      });
-
-      // Step 5: Fire off AI analysis in background (don't await)
-      analyzeViolations({ auditId });
-
-      // Step 6: Navigate to results immediately
-      // The exact scannedAt stored in Convex may differ by a few ms, but the
-      // date segment (YYYY-MM-DD) will match. The legacy-redirect logic on the
-      // results page ensures URLs stay canonical.
+      // Step 3: Scan + server-side persistence succeeded — navigate to results.
+      // Results (including screenshots and AI analysis) were already saved to
+      // Convex by the API route, so no client-side writes are needed.
+      scanRef.current = null;
       track("Scan Completed", {
         grade: scanResult.letterGrade,
         score: scanResult.score,
       });
-      router.push(buildResultsUrl(normalizedUrl, Date.now(), auditId));
+      router.push(resultsUrl);
     } catch (err: unknown) {
+      // Network errors (mobile disconnect, timeout) land here. If we have an
+      // auditId, navigate to the results page — the server may still be
+      // scanning and will persist results to Convex when done.
+      if (auditId && resultsUrl && err instanceof TypeError) {
+        scanRef.current = null;
+        router.push(resultsUrl);
+        return;
+      }
+
       track("Scan Failed", { reason: "error" });
       const errorMessage = err instanceof Error ? err.message : "Failed to create audit";
       setError(errorMessage);
 
-      // Update audit with error if we have an auditId
       if (auditId) {
-        await updateAuditError({ auditId, errorMessage });
+        await updateAuditError({ auditId, errorMessage }).catch(() => {});
       }
 
+      scanRef.current = null;
       setIsSubmitting(false);
       stopProgress();
     }
@@ -504,7 +448,7 @@ export function ScanForm() {
             <p className="font-medium">This site may be behind a firewall</p>
             <p className="mt-1 text-blue-700 dark:text-blue-300/80">
               We&apos;re automatically trying to bypass it. WAF-protected sites can take up to 4 minutes to scan.
-              You can leave this tab open — results will appear when ready.
+              You can switch tabs or apps — your results will be saved automatically.
             </p>
           </div>
         </div>
@@ -516,7 +460,7 @@ export function ScanForm() {
       </div>
       <div className="sr-only" aria-live="polite">
         {isSubmitting && isLikelyWaf
-          ? "This site appears to be behind a firewall. Bypass in progress — this can take up to 4 minutes."
+          ? "This site appears to be behind a firewall. Bypass in progress — this can take up to 4 minutes. Your results will be saved automatically."
           : ""}
       </div>
     </form>

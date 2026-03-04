@@ -11,7 +11,6 @@ import { ScanBlockedError } from "@/lib/scanner";
 import {
   createScanStrategy,
   type ScanStrategyOptions,
-  type StrategyScanResult,
   type ScanModeInfo,
 } from "@/lib/scan/strategies";
 import {
@@ -20,6 +19,9 @@ import {
 } from "@/lib/scan/domain-cache";
 import { scanLog } from "@/lib/scan/monitoring/scan-logger";
 import { checkRobotsTxt } from "@/lib/robots-check";
+import { getConvexClient } from "@/lib/convex-server";
+import { api } from "../../../../convex/_generated/api";
+import type { Id } from "../../../../convex/_generated/dataModel";
 
 // Vercel Pro allows up to 300s for serverless functions
 export const maxDuration = 300;
@@ -53,12 +55,18 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  let convexToken: string | null = null;
+  let auditId: Id<"audits"> | undefined;
+
   try {
     // ---- Auth (Clerk) — resolve early so rate limiter can use userId --------
     let userId: string | null = null;
     try {
       const authResult = await auth();
       userId = authResult.userId ?? null;
+      if (userId) {
+        convexToken = await authResult.getToken({ template: "convex" }) ?? null;
+      }
     } catch {
       // Clerk middleware may not be configured (local mode, tests, etc.)
     }
@@ -103,7 +111,8 @@ export async function POST(request: NextRequest) {
 
     try {
       // ---- Request validation ------------------------------------------------
-      const { url: rawUrl } = await request.json();
+      const { url: rawUrl, auditId: rawAuditId } = await request.json();
+      auditId = rawAuditId as Id<"audits"> | undefined;
 
       if (!rawUrl) {
         return NextResponse.json(
@@ -188,7 +197,112 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      // ---- Server-side Convex persistence (mobile-resilient) ----------------
+      // When the client provides an auditId, persist results directly to Convex
+      // so results survive even if the client disconnects (mobile tab suspend,
+      // app switch, screen lock).
+      let persisted = false;
+      if (auditId) {
+        try {
+          const convex = getConvexClient(convexToken);
+          if (convex) {
+            // Upload screenshots to Convex file storage
+            const uploadScreenshot = async (
+              buf: Buffer | undefined,
+            ): Promise<Id<"_storage"> | undefined> => {
+              if (!buf) return undefined;
+              try {
+                const uploadUrl: string = await convex.mutation(
+                  api.audits.generateUploadUrl,
+                );
+                const uploadResp = await fetch(uploadUrl, {
+                  method: "POST",
+                  headers: { "Content-Type": "image/jpeg" },
+                  body: new Uint8Array(buf),
+                });
+                if (uploadResp.ok) {
+                  const { storageId } = await uploadResp.json();
+                  return storageId as Id<"_storage">;
+                }
+              } catch {
+                // Screenshot upload failure shouldn't block saving results
+              }
+              return undefined;
+            };
+
+            const [screenshotId, mobileScreenshotId] = await Promise.all([
+              uploadScreenshot(desktopResult.screenshot),
+              uploadScreenshot(mobileResult.screenshot),
+            ]);
+
+            await convex.mutation(api.audits.updateAuditWithResults, {
+              auditId,
+              violations: desktopResult.violations,
+              letterGrade: combined.grade,
+              score: combined.score,
+              gradingVersion: GRADING_VERSION,
+              rawViolations: desktopResult.rawViolations,
+              status: "complete" as const,
+              scanMode: toScanModeField(desktopResult.scanMode),
+              ...(desktopResult.scanMode
+                ? { scanModeDetail: JSON.stringify(desktopResult.scanMode) }
+                : {}),
+              ...(metadata?.scanStrategy
+                ? { scanStrategy: metadata.scanStrategy }
+                : {}),
+              ...(metadata?.wafDetected != null
+                ? { wafDetected: metadata.wafDetected }
+                : {}),
+              ...(metadata?.wafType ? { wafType: metadata.wafType } : {}),
+              ...(metadata?.wafBypassed != null
+                ? { wafBypassed: metadata.wafBypassed }
+                : {}),
+              ...(metadata?.scanDurationMs != null
+                ? { scanDurationMs: metadata.scanDurationMs }
+                : {}),
+              ...(desktopResult.pageTitle
+                ? { pageTitle: desktopResult.pageTitle }
+                : {}),
+              ...(desktopResult.truncated ? { truncated: true } : {}),
+              ...(screenshotId ? { screenshotId } : {}),
+              ...(desktopResult.platform
+                ? { platform: desktopResult.platform }
+                : {}),
+              mobileViolations: mobileResult.violations,
+              mobileLetterGrade: mobileGrade.grade,
+              mobileScore: mobileGrade.score,
+              mobileRawViolations: mobileResult.rawViolations,
+              mobileScanMode: toScanModeField(mobileResult.scanMode),
+              ...(mobileResult.scanMode
+                ? {
+                    mobileScanModeDetail: JSON.stringify(
+                      mobileResult.scanMode,
+                    ),
+                  }
+                : {}),
+              ...(mobileResult.truncated ? { mobileTruncated: true } : {}),
+              ...(mobileScreenshotId ? { mobileScreenshotId } : {}),
+              ...(robotsCheck.disallowed ? { robotsDisallowed: true } : {}),
+            });
+
+            // Fire AI analysis (non-blocking)
+            convex
+              .action(api.ai.analyzeViolations, { auditId })
+              .catch(() => {});
+
+            persisted = true;
+            console.warn("[Scan] Results persisted to Convex server-side");
+          }
+        } catch (persistErr) {
+          console.error(
+            "[Scan] Server-side Convex persistence failed (client can recover):",
+            persistErr instanceof Error ? persistErr.message : persistErr,
+          );
+        }
+      }
+
       const responsePayload = {
+        persisted,
         gradingVersion: GRADING_VERSION,
         ...(desktopResult.pageTitle && { pageTitle: desktopResult.pageTitle }),
         ...(desktopResult.platform && { platform: desktopResult.platform }),
@@ -304,6 +418,23 @@ export async function POST(request: NextRequest) {
       await releaseConcurrencySlot();
     }
   } catch (error: unknown) {
+    // Try to mark the audit as errored so the results page doesn't spin forever
+    if (auditId) {
+      try {
+        const convex = getConvexClient(convexToken);
+        if (convex) {
+          const msg =
+            error instanceof Error ? error.message : "Unknown scan error";
+          await convex.mutation(api.audits.updateAuditError, {
+            auditId,
+            errorMessage: msg,
+          });
+        }
+      } catch {
+        // Best-effort; client-side recovery still possible
+      }
+    }
+
     if (error instanceof ScanBlockedError) {
       scanLog.wafDetected("(blocked)", error.pageTitle, "blocked");
       return NextResponse.json(
