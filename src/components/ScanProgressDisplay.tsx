@@ -26,6 +26,20 @@ function formatElapsed(ms: number): string {
   return min > 0 ? `${min}m ${sec}s` : `${sec}s`;
 }
 
+function formatElapsedSpoken(ms: number): string {
+  const totalSec = Math.floor(ms / 1_000);
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  if (min > 0) {
+    return sec > 0
+      ? `${min} minute${min !== 1 ? "s" : ""} ${sec} seconds`
+      : `${min} minute${min !== 1 ? "s" : ""}`;
+  }
+  return `${sec} seconds`;
+}
+
+const SR_ANNOUNCE_INTERVAL_MS = 10_000;
+
 export function ScanProgressDisplay({
   message,
   scannedAt,
@@ -45,13 +59,21 @@ export function ScanProgressDisplay({
   const displayText = text || fallbackMessage;
   const showWafBanner = isWaf || elapsedMs >= 30_000;
 
+  // Quantize elapsed time to 10s intervals for SR announcements.
+  // The live region only re-announces when its text content changes,
+  // so the quantization prevents VoiceOver from reading every second.
+  const srElapsedMs =
+    Math.floor(elapsedMs / SR_ANNOUNCE_INTERVAL_MS) * SR_ANNOUNCE_INTERVAL_MS;
+  const srTimeStr =
+    srElapsedMs >= 5_000 ? `, ${formatElapsedSpoken(srElapsedMs)}` : "";
+  const srText = `${displayText}${srTimeStr}`;
+
   return (
     <div className={className}>
-      {/* Progress message + elapsed timer */}
+      {/* Progress message + elapsed timer (visual only — updates every 1s) */}
       <div
-        role="status"
-        aria-live="polite"
         className="flex items-center justify-center gap-2 text-theme-secondary"
+        aria-hidden="true"
       >
         <span>{displayText}</span>
         {elapsedMs >= 5_000 && (
@@ -59,6 +81,11 @@ export function ScanProgressDisplay({
             {formatElapsed(elapsedMs)}
           </span>
         )}
+      </div>
+
+      {/* SR announcement — quantized to 10s intervals to avoid over-announcing */}
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {srText}
       </div>
 
       {/* WAF info banner */}
@@ -89,13 +116,6 @@ export function ScanProgressDisplay({
           </div>
         </div>
       )}
-
-      {/* SR-only WAF announcement */}
-      <div className="sr-only" aria-live="polite">
-        {showWafBanner
-          ? "This site appears to be behind a firewall. Bypass in progress — this can take up to 4 minutes. Your results will be saved automatically."
-          : ""}
-      </div>
     </div>
   );
 }

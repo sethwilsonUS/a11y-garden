@@ -179,7 +179,12 @@ export const updateAuditStatus = mutation({
   },
   handler: async (ctx, args) => {
     await verifyAuditOwnership(ctx, args.auditId);
-    await ctx.db.patch(args.auditId, { status: args.status });
+    const patch: Record<string, unknown> = { status: args.status };
+    if (args.status === "scanning") {
+      patch.scannedAt = Date.now();
+      patch.scanProgress = undefined;
+    }
+    await ctx.db.patch(args.auditId, patch);
   },
 });
 

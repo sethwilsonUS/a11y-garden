@@ -22,7 +22,8 @@ describe("ScanProgressDisplay", () => {
       render(
         <ScanProgressDisplay message={undefined} scannedAt={Date.now()} />,
       );
-      expect(screen.getByText("Scanning...")).toBeInTheDocument();
+      const matches = screen.getAllByText("Scanning...");
+      expect(matches.length).toBeGreaterThanOrEqual(1);
     });
 
     it("shows custom fallback message", () => {
@@ -33,7 +34,8 @@ describe("ScanProgressDisplay", () => {
           fallbackMessage="Queued..."
         />,
       );
-      expect(screen.getByText("Queued...")).toBeInTheDocument();
+      const matches = screen.getAllByText("Queued...");
+      expect(matches.length).toBeGreaterThanOrEqual(1);
     });
 
     it("shows server progress message when provided", () => {
@@ -43,9 +45,8 @@ describe("ScanProgressDisplay", () => {
           scannedAt={Date.now()}
         />,
       );
-      expect(
-        screen.getByText("Scanning desktop viewport..."),
-      ).toBeInTheDocument();
+      const matches = screen.getAllByText("Scanning desktop viewport...");
+      expect(matches.length).toBeGreaterThanOrEqual(1);
     });
 
     it("strips waf: prefix from display text", () => {
@@ -55,9 +56,10 @@ describe("ScanProgressDisplay", () => {
           scannedAt={Date.now()}
         />,
       );
-      expect(
-        screen.getByText("Firewall detected — attempting bypass..."),
-      ).toBeInTheDocument();
+      const matches = screen.getAllByText(
+        "Firewall detected — attempting bypass...",
+      );
+      expect(matches.length).toBeGreaterThanOrEqual(1);
       expect(screen.queryByText(/^waf:/)).not.toBeInTheDocument();
     });
   });
@@ -178,7 +180,7 @@ describe("ScanProgressDisplay", () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe("accessibility", () => {
-    it("has a live region with role=status for progress messages", () => {
+    it("has a live region with role=status for SR announcements", () => {
       render(
         <ScanProgressDisplay
           message="Scanning desktop viewport..."
@@ -189,7 +191,55 @@ describe("ScanProgressDisplay", () => {
       expect(statusRegions.length).toBeGreaterThanOrEqual(1);
     });
 
-    it("announces WAF detection to screen readers", () => {
+    it("SR announcement uses spoken time format (minutes/seconds not m/s)", () => {
+      const ninetySecondsAgo = Date.now() - 90_000;
+      render(
+        <ScanProgressDisplay
+          message="Scanning..."
+          scannedAt={ninetySecondsAgo}
+        />,
+      );
+      const srRegion = screen.getAllByRole("status")[0];
+      expect(srRegion.textContent).toContain("1 minute");
+      expect(srRegion.textContent).not.toMatch(/\dm\b/);
+    });
+
+    it("SR announcement only updates at 10s intervals", () => {
+      const fifteenSecondsAgo = Date.now() - 15_000;
+      render(
+        <ScanProgressDisplay
+          message="Scanning..."
+          scannedAt={fifteenSecondsAgo}
+        />,
+      );
+      const srRegion = screen.getAllByRole("status")[0];
+      const initial = srRegion.textContent;
+
+      act(() => {
+        vi.advanceTimersByTime(3_000);
+      });
+      expect(srRegion.textContent).toBe(initial);
+
+      act(() => {
+        vi.advanceTimersByTime(7_000);
+      });
+      expect(srRegion.textContent).not.toBe(initial);
+    });
+
+    it("visual timer is hidden from screen readers", () => {
+      const tenSecondsAgo = Date.now() - 10_000;
+      const { container } = render(
+        <ScanProgressDisplay
+          message="Scanning..."
+          scannedAt={tenSecondsAgo}
+        />,
+      );
+      const visualDiv = container.querySelector("[aria-hidden='true']");
+      expect(visualDiv).not.toBeNull();
+      expect(visualDiv!.textContent).toContain("10s");
+    });
+
+    it("WAF banner has role=status for screen readers", () => {
       render(
         <ScanProgressDisplay
           message="waf:Firewall detected — attempting bypass..."
@@ -197,9 +247,7 @@ describe("ScanProgressDisplay", () => {
         />,
       );
       expect(
-        screen.getByText(
-          /firewall.*bypass in progress.*results will be saved/i,
-        ),
+        screen.getByText("This site may be behind a firewall"),
       ).toBeInTheDocument();
     });
   });
