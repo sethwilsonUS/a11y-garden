@@ -31,9 +31,9 @@ A friendly accessibility audit tool that provides AI insights and specific, acti
 - 📋 **Export Reports** — Copy markdown reports including both desktop and mobile results
 - 🛡️ **Rate Limiting & Concurrency** — Per-user (30/hr authenticated, 10/hr anonymous) sliding window and global concurrency cap via Upstash Redis
 - 🔒 **SSRF Protection** — URL validation blocks private IP ranges and non-HTTP schemes in production
-- 📸 **Page Screenshots** — Captures JPEG screenshots at both viewports so users can verify the scanner reached the real site (including WAF-bypassed sites via BQL)
-- 🧱 **WAF Bypass (BQL + JSDOM)** — Automatically detects and bypasses Web Application Firewalls using Browserless BrowserQL stealth mode with an escalation chain (stealth, proxy + waitForNav, proxy + waitForSelector), falling back to server-side axe-core via JSDOM for structural accessibility checks
-- 🔀 **Smart Fallback Strategy** — Tries fast Playwright BaaS first, detects WAF blocks or timeouts, then escalates to BQL for authenticated users — all within Vercel's 60-second function limit
+- 📸 **Page Screenshots** — Captures JPEG screenshots at both viewports so users can verify the scanner reached the real site (including WAF-bypassed sites via BQL, quality 90 for BQL / 75 for Playwright)
+- 🧱 **WAF Bypass (BQL + JSDOM)** — Automatically detects and bypasses Web Application Firewalls using Browserless BrowserQL stealth mode with a 3-tier escalation chain (stealth + proxy, extended navigation wait, Cloudflare challenge solver), falling back to server-side axe-core via JSDOM for structural accessibility checks
+- 🔀 **Smart Fallback Strategy** — Tries fast Playwright BaaS first, detects WAF blocks or timeouts, then escalates to BQL for authenticated users. Correctly distinguishes WAF blocks from Browserless API errors (quota, auth). Leverages Vercel Pro's 5-minute function limit for complex WAF bypasses.
 - 📱 **Smart Dual-Viewport for BQL** — Detects adaptive serving (mobile subdomains, AMP alternates, Vary headers) and only runs a second BQL call when the site genuinely serves different mobile HTML. Responsive sites reuse a single scan.
 - 🗺️ **Domain Strategy Cache** — Remembers which domains need BQL bypass via Redis, skipping the BaaS attempt on repeat scans (saves 5-10s per scan, 7-day TTL)
 - 📊 **Usage Monitoring & Circuit Breaker** — Tracks Browserless unit consumption with an in-memory budget tracker. Automatically disables BQL at 95% monthly budget to prevent billing surprises.
@@ -322,11 +322,12 @@ NEXT_PUBLIC_CONVEX_URL=https://your-deployment.convex.cloud
 # BROWSERLESS_URL=ws://localhost:3001 (local Docker)
 
 # Browserless Cloud BQL endpoint (WAF bypass via stealth + proxies)
-# When BROWSERLESS_TOKEN is set, `fallback` becomes the default strategy:
+# On Vercel with BROWSERLESS_TOKEN, `fallback` becomes the default strategy:
 # tries BaaS first, escalates to BQL on WAF detection.
+# Locally, BROWSERLESS_TOKEN alone does NOT trigger fallback (uses local Playwright).
 # BROWSERLESS_CLOUD_URL=https://production-sfo.browserless.io
 
-# Scan strategy override (default: fallback when BROWSERLESS_TOKEN is set, local otherwise)
+# Scan strategy override (default: auto-detected, see table below)
 # Options: fallback, baas, bql, local
 # SCAN_STRATEGY=fallback
 
@@ -346,11 +347,19 @@ NEXT_PUBLIC_CONVEX_URL=https://your-deployment.convex.cloud
 
 | `SCAN_STRATEGY` Value | When Used | Behavior |
 |----------------------|-----------|----------|
-| *(unset)* | Default | `fallback` if `BROWSERLESS_TOKEN` is set, `local` otherwise |
-| `fallback` | Production (recommended) | BaaS → WAF detect → BQL escalation, all within 60s budget |
+| *(unset)* | Default | Auto-detected (see below) |
+| `fallback` | Production (recommended) | BaaS → WAF detect → BQL escalation, within Vercel Pro 5-minute budget |
 | `baas` | Debug / testing | Playwright via Browserless WebSocket only (no BQL) |
 | `bql` | Debug / testing | BQL + JSDOM only (skips Playwright entirely) |
 | `local` | Local development | Local Playwright (no Browserless needed) |
+
+**Auto-detection logic** (when `SCAN_STRATEGY` is unset):
+
+| Environment | Strategy | Reason |
+|-------------|----------|--------|
+| `BROWSERLESS_URL` set | `local` | Docker Browserless for localhost scanning |
+| On Vercel + `BROWSERLESS_TOKEN` | `fallback` | BaaS → BQL escalation for WAF bypass |
+| Local dev (neither set) | `local` | System Playwright, simplest setup |
 
 ### What happens when variables are missing?
 
@@ -366,7 +375,7 @@ The app is designed to degrade gracefully rather than crash:
 | `OPENAI_API_KEY` (.env.local) | CLI and local mode skip AI summary when missing. | N/A (CLI / local mode only). |
 | `UPSTASH_REDIS_REST_URL/TOKEN` | Rate limiting and domain cache disabled — all scans allowed, no WAF-domain memory. | **Required** — prevents abuse via per-user rate limits, concurrency caps, and caches domain strategies. |
 | `RATE_LIMIT_ENABLED` | Rate limiting stays off (default). Set to `true` to test locally. | Not needed — rate limiting is always on when Upstash vars are present. |
-| `SCAN_STRATEGY` | Auto-detected: `fallback` when token is set, `local` otherwise. | Usually leave unset for auto-detection. Override to force a specific strategy. |
+| `SCAN_STRATEGY` | Auto-detected: `fallback` on Vercel with token, `local` otherwise. | Usually leave unset for auto-detection. Override to force a specific strategy. |
 
 ---
 
@@ -379,21 +388,26 @@ The app is designed to degrade gracefully rather than crash:
 ├── convex/                    # Convex backend
 │   ├── schema.ts             # Database schema (audits, domainStrategies, etc.)
 │   ├── audits.ts             # Audit queries & mutations (incl. mobile + WAF metadata)
-│   ├── ai.ts                 # OpenAI integration (parallel desktop/mobile)
+│   ├── ai.ts                 # OpenAI integration (parallel desktop/mobile + platform tips)
 │   ├── agentPlan.ts          # AGENTS.md fix-plan generation action
+│   ├── scanner.ts            # Convex-side scanner utilities
 │   ├── domainStrategies.ts   # Domain strategy cache (WAF-known domains)
 │   ├── scanStats.ts          # Scan usage report (30-day aggregates)
 │   ├── auth.config.ts        # Clerk ↔ Convex auth config
 │   └── lib/
 │       ├── grading.ts        # Grading algorithm + combined grade
 │       ├── groupViolations.ts # Violation grouping & normalization
+│       ├── dedup.ts           # Audit deduplication helpers
 │       └── buildAgentPlanPrompt.ts # Prompt builder for agent plans
 ├── docs/
 │   └── browserless-upgrade-decision.md # Browserless tier upgrade framework
 ├── src/
 │   ├── app/                  # Next.js App Router
 │   │   ├── page.tsx          # Home page
+│   │   ├── layout.tsx        # Root layout
 │   │   ├── providers.tsx     # Convex/Clerk providers (conditional)
+│   │   ├── opengraph-image.tsx # OG image generator
+│   │   ├── twitter-image.tsx  # Twitter card image generator
 │   │   ├── demo/             # Demo mode (no auth required)
 │   │   ├── results/          # Results pages (tabbed desktop/mobile)
 │   │   ├── database/         # Community audit database
@@ -401,46 +415,59 @@ The app is designed to degrade gracefully rather than crash:
 │   │   ├── sign-in/          # Clerk sign-in page
 │   │   ├── sign-up/          # Clerk sign-up page
 │   │   └── api/
-│   │       ├── scan/          # Scan API (strategy selection + dual-viewport)
+│   │       ├── scan/          # Scan API (strategy selection, 300s max, dual-viewport)
+│   │       ├── og/            # Dynamic OG image per audit
 │   │       ├── ai-summary/    # AI summary API (local mode + demo)
 │   │       └── health/
 │   │           └── browserless/ # Browserless API health check
 │   ├── components/
 │   │   ├── AgentPlanButton.tsx     # Generate/view AGENTS.md fix plans
 │   │   ├── AgentPlanViewer.tsx     # Modal viewer for fix plan markdown
-│   │   ├── ScanForm.tsx            # URL input + scan orchestration
+│   │   ├── AuditCard.tsx           # Audit card for database/dashboard lists
+│   │   ├── ButtonCard.tsx          # Reusable button card component
+│   │   ├── ScanForm.tsx            # URL input + scan orchestration + WAF progress
 │   │   ├── ScanModeBanner.tsx      # Detailed scan mode info (full/safe/structural)
+│   │   ├── SafeModeModal.tsx       # Modal explaining safe mode
+│   │   ├── StatusIndicator.tsx     # Scan status indicator
 │   │   ├── WafBadge.tsx            # WAF bypass status badge
 │   │   ├── ScreenshotSection.tsx   # Screenshot viewer (desktop or mobile)
 │   │   ├── ErrorBoundary.tsx       # Global React error boundary
+│   │   ├── Footer.tsx              # Site footer
 │   │   ├── Navbar.tsx              # Top nav
 │   │   ├── GradeBadge.tsx          # Letter grade display
 │   │   ├── ViolationCard.tsx       # Severity breakdown cards
-│   │   └── ThemeProvider.tsx       # Light/dark theme context
+│   │   ├── ThemeProvider.tsx       # Light/dark theme context
+│   │   └── ThemeToggle.tsx         # Light/dark toggle button
 │   ├── lib/
 │   │   ├── scanner.ts             # Scan engine (Playwright direct)
 │   │   ├── rate-limit.ts          # Per-user/IP rate limiting + concurrency
 │   │   ├── url-validator.ts       # SSRF-safe URL validation
 │   │   ├── robots-check.ts        # Advisory robots.txt checker
-│   │   ├── platforms.ts           # Platform labels, confidence levels
+│   │   ├── platforms.ts           # Platform detection, labels, confidence levels
 │   │   ├── report.ts              # Markdown report builder
 │   │   ├── grading.ts             # Client-side grading
 │   │   ├── ai-summary.ts          # OpenAI integration (CLI + local mode)
 │   │   ├── create-agent-plan-zip.ts # ZIP bundler for fix plans
+│   │   ├── analytics.ts          # Client-side analytics
+│   │   ├── analytics-server.ts   # Server-side analytics
+│   │   ├── audit-sort.ts         # Audit sorting helpers
+│   │   ├── nav-links.ts          # Navigation link definitions
+│   │   ├── urls.ts                # URL builder utilities
 │   │   ├── mode.ts                # Local vs. web mode detection
 │   │   └── scan/                  # Scan strategy subsystem
 │   │       ├── strategies/
-│   │       │   ├── index.ts           # Strategy factory (createScanStrategy)
+│   │       │   ├── index.ts           # Strategy factory (auto-detects via VERCEL env)
 │   │       │   ├── types.ts           # ScanStrategy interface + ScanMetadata
 │   │       │   ├── playwright-local.ts # Local Playwright strategy
 │   │       │   ├── playwright-baas.ts  # Cloud Playwright (BaaS) strategy
-│   │       │   ├── bql-jsdom.ts        # BQL + JSDOM structural scan strategy
+│   │       │   ├── bql-jsdom.ts        # BQL + JSDOM (3-tier escalation + screenshots)
 │   │       │   └── fallback.ts         # BaaS → BQL escalation with time budget
 │   │       ├── monitoring/
 │   │       │   ├── usage-tracker.ts   # Browserless unit consumption tracker
 │   │       │   └── scan-logger.ts     # Structured JSON logging
 │   │       ├── rules/
-│   │       │   └── categories.ts      # axe-core rule classifications
+│   │       │   ├── categories.ts      # axe-core rule classifications
+│   │       │   └── jsdom-compatible.ts # JSDOM-safe rule list
 │   │       ├── utils/
 │   │       │   ├── waf-detector.ts    # WAF type detection heuristics
 │   │       │   └── adaptive-detect.ts # Adaptive serving detection
@@ -521,31 +548,33 @@ The app is designed to degrade gracefully rather than crash:
 4. **URL validated** — SSRF protection blocks private IPs and non-HTTP schemes in production
 5. **robots.txt checked** — Advisory check; disallowed pages still scan but results show a notice
 6. **Domain cache consulted** — Redis lookup for known-WAF domains. If the domain previously required BQL, skip straight to BQL for authenticated users (saves 5-10s)
-7. **Strategy selected** — The fallback strategy (default when `BROWSERLESS_TOKEN` is set) tries BaaS first, escalates to BQL on WAF detection or timeout. Can be overridden via `SCAN_STRATEGY` env var.
+7. **Strategy selected** — On Vercel with `BROWSERLESS_TOKEN`, the fallback strategy tries BaaS first, then escalates to BQL on WAF detection or timeout. Browserless API errors (quota/auth) are caught early and surfaced as infrastructure errors, not false WAF detections. Can be overridden via `SCAN_STRATEGY` env var.
 8. **Desktop scan** — Depending on strategy:
-   - **Playwright (BaaS/local):** Opens a browser context at 1920x1080, navigates, runs axe-core, captures JPEG screenshot
-   - **BQL + JSDOM:** Stealth BQL navigates the page (with WAF verify/escalation chain), captures desktop + mobile screenshots in a single session via GraphQL aliases, then runs axe-core server-side against the HTML via JSDOM (structural rules only)
+   - **Playwright (BaaS/local):** Opens a browser context at 1920x1080, navigates, runs axe-core, captures JPEG screenshot (quality 75)
+   - **BQL + JSDOM:** Stealth BQL navigates the page through a 3-tier escalation chain (stealth+proxy → extended wait → Cloudflare verify), captures desktop + mobile screenshots in a single session via GraphQL aliases (quality 90), then runs axe-core server-side against the HTML via JSDOM (structural rules only). Dynamic timeouts adapt to the available time budget.
 9. **Mobile scan** — Depending on strategy:
    - **Playwright:** Opens a second context at 390x844 with iPhone emulation, runs axe-core + screenshot in parallel with desktop
    - **BQL responsive sites:** Reuses desktop HTML + axe results (JSDOM is viewport-independent), serves the mobile screenshot captured in the desktop BQL session
    - **BQL adaptive sites:** Detected via heuristics (mobile subdomains, AMP alternates, Vary headers); a second BQL call with `emulate(device: "iPhone 14")` fetches genuinely different mobile HTML
 10. **Results truncated** — If raw violations exceed 350 KB per viewport, node arrays are trimmed to stay under Convex's 1 MB document limit
-11. **Platform detected** — CMS platforms and frameworks identified from HTML markers with confidence levels
+11. **Platform detected** — CMS platforms and frameworks identified from HTML markers with confidence levels. Detection runs on both Playwright and BQL paths via a shared `detectPlatformFromHtml` utility. AI generates platform-specific fix advice when a platform is detected.
 12. **Domain cache updated** — If WAF was bypassed, the domain is cached in Redis (7-day TTL) for faster repeat scans
 13. **Audit saved** — Scan results for both viewports + WAF metadata (strategy used, WAF type, bypass status, duration) stored in Convex. Screenshots uploaded to file storage.
 14. **Grades calculated** — Per-viewport grades (A-F) plus a combined weighted grade (60% desktop + 40% mobile)
-15. **AI analyzes** — OpenAI generates separate summaries for desktop and mobile violations (fires in background). Identical violations reuse previous AI content.
-16. **Results displayed** — Tabbed UI with per-viewport grades, violations, screenshots, AI summaries, scan mode banners (full/safe/structural), and WAF status badges
+15. **AI analyzes** — OpenAI generates separate summaries for desktop and mobile violations (fires in background). Identical violations reuse previous AI content, unless a platform was newly detected (triggers regeneration with platform-specific context).
+16. **Results displayed** — Tabbed UI with per-viewport grades, violations, screenshots, AI summaries, scan mode banners (full/safe/structural), WAF status badges, and platform-specific fix tips
 
 ### WAF Bypass Escalation Chain
 
-When the fallback strategy detects a WAF block, it escalates through three BQL tiers:
+When the fallback strategy detects a WAF block (or BaaS fails for any site-level reason), it escalates through three BQL tiers. Each tier gets a dynamic time budget (up to 90 seconds per step) rather than hardcoded timeouts.
 
-| Tier | Method | Cost | Use Case |
-|------|--------|------|----------|
-| 1 | Stealth + Cloudflare verify | ~1 unit | Cloudflare-protected sites |
-| 2 | Stealth + residential proxy + waitForNavigation | ~1-6 units | DataDome, JS challenges |
-| 3 | Stealth + residential proxy + waitForSelector | ~1-6 units | Heavy JS challenges, lazy-loaded content |
+| Tier | Method | Wait Strategy | Use Case |
+|------|--------|---------------|----------|
+| 1 | Stealth + residential proxy | `waitForNavigation(networkIdle)` — dynamic 8-20s | Most WAF-protected sites |
+| 2 | Stealth + residential proxy + extended wait | `waitForNavigation(networkIdle)` — dynamic 12-25s | Slow-loading WAF challenges |
+| 3 | Stealth + residential proxy + Cloudflare verify | `verify(type: cloudflare)` challenge solver | Cloudflare-specific WAF challenges |
+
+**Error classification:** Browserless API errors (401 quota exhausted, 403 auth failed) are correctly distinguished from WAF blocks — they surface a clear "scanner service temporarily unavailable" message instead of falsely triggering the WAF flow.
 
 If all three tiers fail, the scan returns a blocked error. The auth gate ensures only signed-in users consume BQL units. The circuit breaker disables BQL at 95% of the monthly unit budget.
 
@@ -679,8 +708,10 @@ npm run lint             # Run ESLint
 
 ### Vercel + Convex
 
+> **Important:** This project requires **Vercel Pro** (or higher) for WAF bypass support. The scan API uses `maxDuration = 300` (5 minutes), which exceeds the Hobby plan's 10-second limit. Non-WAF sites typically scan in 10-30 seconds; WAF-protected sites may take 1-4 minutes.
+
 1. Push to GitHub
-2. Import project in [Vercel](https://vercel.com)
+2. Import project in [Vercel](https://vercel.com) (Pro plan)
 3. Add environment variables in Vercel dashboard
 4. Deploy
 
@@ -689,11 +720,11 @@ For browser-based scanning in production, you'll need [Browserless](https://brow
 Add to Vercel environment variables:
 ```
 BROWSERLESS_TOKEN=your-token
-BROWSERLESS_CLOUD_URL=https://production-sfo.browserless.io
+BROWSERLESS_CLOUD_URL=wss://production-sfo.browserless.io
 BROWSERLESS_MONTHLY_UNIT_BUDGET=1000
 ```
 
-The `BROWSERLESS_TOKEN` enables Playwright BaaS (fast path) and BQL (WAF bypass). The `BROWSERLESS_CLOUD_URL` enables BQL stealth routing via residential proxies for WAF-protected sites. The budget variable controls the circuit breaker threshold.
+The `BROWSERLESS_TOKEN` enables Playwright BaaS (fast path) and BQL (WAF bypass). The `BROWSERLESS_CLOUD_URL` enables BQL stealth routing via residential proxies for WAF-protected sites (the code normalizes `wss://` to `https://` for HTTP API calls). The budget variable controls the circuit breaker threshold.
 
 > **Tip:** Check `/api/health/browserless` after deployment to verify BaaS and BQL connectivity.
 
