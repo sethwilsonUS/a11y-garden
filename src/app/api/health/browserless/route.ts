@@ -58,30 +58,31 @@ async function checkBql(): Promise<HealthStatus["bql"]> {
     .replace(/^ws:/, "http:");
   if (!token) return { reachable: false, error: "BROWSERLESS_TOKEN not set" };
 
-  const endpoint = `${cloudUrl}/chromium/bql?token=${token}`;
+  // Use /stealth/bql — the same endpoint real scans use.
+  // Send an intentionally minimal (invalid) query; a 400 "bad query" response
+  // proves the API is reachable and authenticating our token.
+  const endpoint = `${cloudUrl}/stealth/bql?token=${token}`;
   const start = Date.now();
   try {
     const res = await fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        query: 'mutation Ping { goto(url: "about:blank", waitUntil: domContentLoaded) { status } }',
-        variables: {},
-      }),
-      signal: AbortSignal.timeout(15_000),
+      body: JSON.stringify({ query: "{ __typename }" }),
+      signal: AbortSignal.timeout(10_000),
     });
+    // 200 = valid response, 400 = bad query but API is reachable and authed
     const reachable = res.ok || res.status === 400;
     return {
       reachable,
       latencyMs: Date.now() - start,
-      endpoint: `${cloudUrl}/chromium/bql`,
+      endpoint: `${cloudUrl}/stealth/bql`,
       ...(!reachable ? { error: `HTTP ${res.status}` } : {}),
     };
   } catch (err) {
     return {
       reachable: false,
       latencyMs: Date.now() - start,
-      endpoint: `${cloudUrl}/chromium/bql`,
+      endpoint: `${cloudUrl}/stealth/bql`,
       error: err instanceof Error ? err.message : "Unknown error",
     };
   }
