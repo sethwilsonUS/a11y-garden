@@ -30,6 +30,9 @@ const CF_PATTERNS_RE = /cf-browser-verification|challenge-platform|cf-ray/i;
 const AKAMAI_PATTERNS_RE = /akamai|access denied.*akamai/i;
 const DATADOME_PATTERNS_RE = /captcha-delivery\.com|datadome.*device check/i;
 const PERIMETERX_PATTERNS_RE = /perimeterx|px-captcha|human-challenge/i;
+// HUMAN Security "Press & Hold" interactive challenge — overlays real page content,
+// so the HTML is large and HTTP status is 200. Must match without size guards.
+const HUMAN_INTERACTIVE_RE = /press\s*&amp;\s*hold|press\s+and\s+hold|robot or human\?|human-challenge.*press/i;
 
 /**
  * Detect whether an HTML response is a WAF challenge page rather than
@@ -49,7 +52,13 @@ export function detectWaf(
     return { detected: true, type: "datadome" };
   }
 
-  // PerimeterX challenge pages
+  // HUMAN Security interactive "Press & Hold" challenge — appears as an overlay
+  // on top of real page content, so the HTML is large and status is 200.
+  if (HUMAN_INTERACTIVE_RE.test(lower)) {
+    return { detected: true, type: "perimeterx" };
+  }
+
+  // PerimeterX challenge pages (small HTML variant)
   if (html.length < 10_000 && PERIMETERX_PATTERNS_RE.test(lower)) {
     return { detected: true, type: "perimeterx" };
   }

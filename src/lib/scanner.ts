@@ -709,12 +709,16 @@ export async function scanUrl(
       /access denied|attention required|just a moment|checking your browser|robot check|blocked|pardon our interruption|please verify|security check|one more step/i;
     const blockedBodyPatterns =
       /captcha|cf-browser-verification|challenge-platform|akamai|perimeterx|datadome|cloudflare|enable javascript and cookies|unusual traffic/i;
+    // HUMAN Security "Press & Hold" — overlays real content, large page, HTTP 200
+    const humanInteractiveRe =
+      /press & hold|press and hold|robot or human\?/i;
 
     const looksBlocked =
       httpStatus === 403 ||
       httpStatus === 503 ||
       blockedTitlePatterns.test(pageTitle) ||
-      (blockedBodyPatterns.test(bodyText) && bodyLength < 5000);
+      (blockedBodyPatterns.test(bodyText) && bodyLength < 5000) ||
+      humanInteractiveRe.test(bodyText);
 
     if (looksBlocked) {
       throw new ScanBlockedError(
@@ -855,12 +859,15 @@ export async function scanUrlDual(
       /access denied|attention required|just a moment|checking your browser|robot check|blocked|pardon our interruption|please verify|security check|one more step/i;
     const blockedBodyPatterns =
       /captcha|cf-browser-verification|challenge-platform|akamai|perimeterx|datadome|cloudflare|enable javascript and cookies|unusual traffic/i;
+    const humanInteractiveRe2 =
+      /press & hold|press and hold|robot or human\?/i;
 
     const looksBlocked =
       httpStatus === 403 ||
       httpStatus === 503 ||
       blockedTitlePatterns.test(pageTitle) ||
-      (blockedBodyPatterns.test(bodyText) && bodyText.length < 5000);
+      (blockedBodyPatterns.test(bodyText) && bodyText.length < 5000) ||
+      humanInteractiveRe2.test(bodyText);
 
     if (looksBlocked) {
       throw new ScanBlockedError(
