@@ -332,9 +332,31 @@ export class BqlJsdomStrategy implements ScanStrategy {
       return this.handleMobileViewport(url, opts);
     }
 
+    const scanStart = Date.now();
     const fetchResult = await this.fetchHtml(url, opts.timeBudgetMs, {
       screenshot: opts.captureScreenshot,
     });
+
+    // If HTML came back but screenshots didn't, retry with a dedicated
+    // screenshot-only query. The WAF challenge should be cached, so the
+    // second navigation is typically fast (~5-10s).
+    const screenshotsMissing =
+      opts.captureScreenshot &&
+      !fetchResult.screenshotBase64 &&
+      !fetchResult.mobileScreenshotBase64;
+
+    if (screenshotsMissing) {
+      const elapsed = Date.now() - scanStart;
+      const remaining = opts.timeBudgetMs - elapsed;
+      if (remaining > 20_000) {
+        console.log(`[BQL] Screenshots missing — retrying with dedicated query (${Math.round(remaining / 1000)}s remaining)`);
+        const retryResult = await this.retryScreenshots(url, Math.min(remaining - 5_000, 60_000));
+        if (retryResult) {
+          fetchResult.screenshotBase64 = retryResult.desktopBase64;
+          fetchResult.mobileScreenshotBase64 = retryResult.mobileBase64;
+        }
+      }
+    }
 
     const axeResult = await runAxeOnHtml(
       fetchResult.content,
@@ -509,5 +531,57 @@ export class BqlJsdomStrategy implements ScanStrategy {
     }
 
     throw new Error("BQL escalation chain exhausted without result");
+  }
+
+  /**
+   * Dedicated screenshot retry. Navigates to the URL again (WAF challenge
+   * should be cached) and captures desktop + mobile screenshots.
+   * Returns null if the retry fails — screenshots are best-effort.
+   */
+  private async retryScreenshots(
+    url: string,
+    timeoutMs: number,
+  ): Promise<{ desktopBase64: string | null; mobileBase64: string | null } | null> {
+    const query = `mutation Screenshots {
+  desktopVp: viewport(width: ${DESKTOP_VP.width}, height: ${DESKTOP_VP.height}) { time }
+  goto(url: "${url}", waitUntil: load) { status time }
+  waitForNavigation(timeout: 15000, waitUntil: networkIdle) { time }
+  desktopScreenshot: screenshot(fullPage: false, type: jpeg, quality: 90) { base64 }
+  mobileVp: viewport(width: ${MOBILE_VP.width}, height: ${MOBILE_VP.height}) { time }
+  mobileScreenshot: screenshot(fullPage: false, type: jpeg, quality: 90) { base64 }
+}`;
+
+    try {
+      const data = await callBql(query, this.token, this.cloudUrl, {
+        proxy: true,
+        humanlike: true,
+        timeoutMs,
+      });
+
+      if (data.errors?.length) {
+        console.log(`[BQL] Screenshot retry returned errors: ${data.errors.map(e => e.message).join("; ")}`);
+        return null;
+      }
+
+      const d = data.data as Record<string, Record<string, unknown>> | undefined;
+      const desktop = d?.desktopScreenshot as { base64?: string } | undefined;
+      const mobile = d?.mobileScreenshot as { base64?: string } | undefined;
+
+      const hasScreenshots = !!desktop?.base64 || !!mobile?.base64;
+      if (hasScreenshots) {
+        console.log("[BQL] Screenshot retry succeeded");
+      } else {
+        console.log("[BQL] Screenshot retry returned no data");
+      }
+
+      return {
+        desktopBase64: desktop?.base64 ?? null,
+        mobileBase64: mobile?.base64 ?? null,
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.log(`[BQL] Screenshot retry failed: ${msg}`);
+      return null;
+    }
   }
 }
