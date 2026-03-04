@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback, useEffect } from "react";
-import { useMutation, useAction } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { useRouter } from "next/navigation";
 import { Id } from "../../convex/_generated/dataModel";
@@ -27,6 +27,19 @@ const SCAN_PROGRESS_STEPS: [number, string][] = [
 ];
 
 const WAF_WARNING_THRESHOLD_MS = 30_000;
+const SR_ANNOUNCE_INTERVAL_MS = 10_000;
+
+function formatElapsedSpoken(ms: number): string {
+  const totalSec = Math.floor(ms / 1_000);
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  if (min > 0) {
+    return sec > 0
+      ? `${min} minute${min !== 1 ? "s" : ""} ${sec} seconds`
+      : `${min} minute${min !== 1 ? "s" : ""}`;
+  }
+  return `${sec} seconds`;
+}
 
 function useScanProgress() {
   const [status, setStatus] = useState("");
@@ -92,14 +105,39 @@ export function ScanForm() {
     retryAfter?: number;
   } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [activeAuditId, setActiveAuditId] = useState<Id<"audits"> | null>(null);
   const { status: scanStatus, elapsedMs, isLikelyWaf, startProgress, setManualStatus: setScanStatus, stopProgress } = useScanProgress();
   const createAudit = useMutation(api.audits.createAudit);
   const updateAuditStatus = useMutation(api.audits.updateAuditStatus);
-  const updateAuditWithResults = useMutation(api.audits.updateAuditWithResults);
   const updateAuditError = useMutation(api.audits.updateAuditError);
-  const analyzeViolations = useAction(api.ai.analyzeViolations);
-  const generateUploadUrl = useMutation(api.audits.generateUploadUrl);
   const router = useRouter();
+
+  const auditProgress = useQuery(
+    api.audits.getAudit,
+    activeAuditId ? { auditId: activeAuditId } : "skip",
+  );
+
+  const serverProgress = auditProgress?.scanProgress;
+  const serverWaf = !!serverProgress?.startsWith("waf:");
+  const effectiveStatus = serverProgress
+    ? (serverWaf ? serverProgress.slice(4) : serverProgress)
+    : scanStatus;
+  const showWafBanner = serverWaf || isLikelyWaf;
+
+  // Track in-flight scan so the visibilitychange handler can recover
+  const scanRef = useRef<{ auditId: string; resultsUrl: string } | null>(null);
+
+  useEffect(() => {
+    function onVisibilityChange() {
+      if (document.visibilityState !== "visible") return;
+      const scan = scanRef.current;
+      if (!scan) return;
+      router.push(scan.resultsUrl);
+    }
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () =>
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, [router]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -111,7 +149,6 @@ export function ScanForm() {
     // Validate and normalize URL
     let normalizedUrl = url.trim();
     if (!normalizedUrl.startsWith("http://") && !normalizedUrl.startsWith("https://")) {
-      // Use http:// for local addresses (no TLS), https:// for everything else
       const looksLocal = /^(localhost|127\.\d+\.\d+\.\d+|\[::1\])(:\d+)?/i.test(
         normalizedUrl
       );
@@ -130,11 +167,6 @@ export function ScanForm() {
     track("Scan Submitted", { isPublic });
 
     // ---- Self-scan warning (dev only) -----------------------------------------
-    // In development without a remote browser (Browserless), the Next.js dev
-    // server can deadlock when asked to scan its own origin. With Browserless,
-    // the Docker URL rewriting makes it work. We show a warning but allow the
-    // scan — if Browserless is configured it'll succeed, otherwise the user will
-    // see visibly wrong results and know to use the CLI.
     let isSelfScanInDev = false;
     if (process.env.NODE_ENV === "development") {
       try {
@@ -153,14 +185,28 @@ export function ScanForm() {
     }
 
     let auditId: Id<"audits"> | null = null;
+    let resultsUrl: string | null = null;
 
     try {
-      // Step 1: Call the scan API first so rate-limit / capacity rejections
-      //         happen before we create an audit row in Convex.
+      // Step 1: Create the audit in Convex FIRST so the server can persist
+      // results directly — making the scan resilient to mobile tab suspension,
+      // app switching, and screen lock.
+      auditId = await createAudit({
+        url: normalizedUrl,
+        isPublic,
+      });
+      setActiveAuditId(auditId);
+      await updateAuditStatus({ auditId, status: "scanning" });
+
+      resultsUrl = buildResultsUrl(normalizedUrl, Date.now(), auditId);
+      scanRef.current = { auditId, resultsUrl };
+
+      // Step 2: Call the scan API with auditId — the server will persist
+      // results to Convex server-side so they survive even if this tab dies.
       const response = await fetch("/api/scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: normalizedUrl }),
+        body: JSON.stringify({ url: normalizedUrl, auditId }),
       });
 
       const scanResult = await response.json();
@@ -173,6 +219,9 @@ export function ScanForm() {
           message: scanResult.error,
           retryAfter: retryAfter ? Number(retryAfter) : undefined,
         });
+        await updateAuditError({ auditId, errorMessage: scanResult.error });
+        scanRef.current = null;
+        setActiveAuditId(null);
         setIsSubmitting(false);
         stopProgress();
         return;
@@ -182,11 +231,13 @@ export function ScanForm() {
         track("Scan Failed", {
           reason: scanResult.requiresAuth ? "waf_auth_required" : "waf",
         });
-        setRateLimitInfo({
-          message: scanResult.error || (scanResult.requiresAuth
-            ? "This site couldn't be scanned. Sign in to unlock alternative scanning methods."
-            : "This site's firewall blocked our automated scanner, so we can't produce accurate results. Try a different URL."),
-        });
+        const msg = scanResult.error || (scanResult.requiresAuth
+          ? "This site couldn't be scanned. Sign in to unlock alternative scanning methods."
+          : "This site's firewall blocked our automated scanner, so we can't produce accurate results. Try a different URL.");
+        setRateLimitInfo({ message: msg });
+        await updateAuditError({ auditId, errorMessage: msg });
+        scanRef.current = null;
+        setActiveAuditId(null);
         setIsSubmitting(false);
         stopProgress();
         return;
@@ -196,112 +247,39 @@ export function ScanForm() {
         throw new Error(scanResult.error || "Scan failed");
       }
 
-      // Step 2: Scan succeeded — now create the audit in Convex
-      setScanStatus("Saving results...");
-      auditId = await createAudit({
-        url: normalizedUrl,
-        isPublic,
-      });
-
-      // Warn in console if screenshots appear blank (dev/debugging aid)
-      if (scanResult.desktop?.screenshotWarning) {
-        console.warn("[A11y Garden] Desktop:", scanResult.desktop.screenshotWarning);
-      }
-      if (scanResult.mobile?.screenshotWarning) {
-        console.warn("[A11y Garden] Mobile:", scanResult.mobile.screenshotWarning);
-      }
-
-      // Step 3: Upload screenshots to Convex file storage (desktop + mobile in parallel)
-      const uploadScreenshot = async (base64?: string): Promise<Id<"_storage"> | undefined> => {
-        if (!base64) return undefined;
-        try {
-          const uploadUrl = await generateUploadUrl();
-          const binaryStr = atob(base64);
-          const bytes = new Uint8Array(binaryStr.length);
-          for (let i = 0; i < binaryStr.length; i++) {
-            bytes[i] = binaryStr.charCodeAt(i);
-          }
-          const uploadResp = await fetch(uploadUrl, {
-            method: "POST",
-            headers: { "Content-Type": "image/jpeg" },
-            body: bytes,
-          });
-          if (uploadResp.ok) {
-            const { storageId } = await uploadResp.json();
-            return storageId as Id<"_storage">;
-          }
-        } catch {
-          // Screenshot upload failure shouldn't block saving results
-        }
-        return undefined;
-      };
-
-      const [screenshotId, mobileScreenshotId] = await Promise.all([
-        uploadScreenshot(scanResult.desktop?.screenshotBase64),
-        uploadScreenshot(scanResult.mobile?.screenshotBase64),
-      ]);
-
-      // Step 4: Update Convex with scan results and mark as complete
-      setScanStatus("Finalizing...");
-      await updateAuditStatus({ auditId, status: "scanning" });
-      await updateAuditWithResults({
-        auditId,
-        violations: scanResult.desktop.violations,
-        letterGrade: scanResult.letterGrade,
-        score: scanResult.score,
-        gradingVersion: scanResult.gradingVersion,
-        rawViolations: scanResult.desktop.rawViolations,
-        status: "complete",
-        scanMode: scanResult.desktop.scanMode ?? (scanResult.desktop.safeMode ? "safe" : "full"),
-        ...(scanResult.desktop.scanModeDetail
-          ? { scanModeDetail: JSON.stringify(scanResult.desktop.scanModeDetail) }
-          : {}),
-        ...(scanResult.scanStrategy ? { scanStrategy: scanResult.scanStrategy } : {}),
-        ...(scanResult.wafDetected != null ? { wafDetected: scanResult.wafDetected } : {}),
-        ...(scanResult.wafType ? { wafType: scanResult.wafType } : {}),
-        ...(scanResult.wafBypassed != null ? { wafBypassed: scanResult.wafBypassed } : {}),
-        ...(scanResult.scanDurationMs != null ? { scanDurationMs: scanResult.scanDurationMs } : {}),
-        ...(scanResult.pageTitle ? { pageTitle: scanResult.pageTitle } : {}),
-        ...(scanResult.desktop.truncated ? { truncated: true } : {}),
-        ...(screenshotId ? { screenshotId } : {}),
-        ...(scanResult.platform ? { platform: scanResult.platform } : {}),
-        ...(scanResult.mobile ? {
-          mobileViolations: scanResult.mobile.violations,
-          mobileLetterGrade: scanResult.mobile.letterGrade,
-          mobileScore: scanResult.mobile.score,
-          mobileRawViolations: scanResult.mobile.rawViolations,
-          mobileScanMode: scanResult.mobile.scanMode ?? (scanResult.mobile.safeMode ? ("safe" as const) : ("full" as const)),
-          ...(scanResult.mobile.scanModeDetail
-            ? { mobileScanModeDetail: JSON.stringify(scanResult.mobile.scanModeDetail) }
-            : {}),
-          ...(scanResult.mobile.truncated ? { mobileTruncated: true } : {}),
-          ...(mobileScreenshotId ? { mobileScreenshotId } : {}),
-        } : {}),
-        ...(scanResult.robotsDisallowed ? { robotsDisallowed: true } : {}),
-      });
-
-      // Step 5: Fire off AI analysis in background (don't await)
-      analyzeViolations({ auditId });
-
-      // Step 6: Navigate to results immediately
-      // The exact scannedAt stored in Convex may differ by a few ms, but the
-      // date segment (YYYY-MM-DD) will match. The legacy-redirect logic on the
-      // results page ensures URLs stay canonical.
+      // Step 3: Scan + server-side persistence succeeded — navigate to results.
+      // Results (including screenshots and AI analysis) were already saved to
+      // Convex by the API route, so no client-side writes are needed.
+      scanRef.current = null;
+      setActiveAuditId(null);
+      stopProgress();
+      setIsSubmitting(false);
       track("Scan Completed", {
         grade: scanResult.letterGrade,
         score: scanResult.score,
       });
-      router.push(buildResultsUrl(normalizedUrl, Date.now(), auditId));
+      router.push(resultsUrl);
     } catch (err: unknown) {
+      // Network errors (mobile disconnect, timeout) land here. If we have an
+      // auditId, navigate to the results page — the server may still be
+      // scanning and will persist results to Convex when done.
+      if (auditId && resultsUrl && err instanceof TypeError) {
+        scanRef.current = null;
+        setActiveAuditId(null);
+        router.push(resultsUrl);
+        return;
+      }
+
       track("Scan Failed", { reason: "error" });
       const errorMessage = err instanceof Error ? err.message : "Failed to create audit";
       setError(errorMessage);
 
-      // Update audit with error if we have an auditId
       if (auditId) {
-        await updateAuditError({ auditId, errorMessage });
+        await updateAuditError({ auditId, errorMessage }).catch(() => {});
       }
 
+      scanRef.current = null;
+      setActiveAuditId(null);
       setIsSubmitting(false);
       stopProgress();
     }
@@ -476,9 +454,9 @@ export function ScanForm() {
             <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
           </svg>
           <span className="transition-opacity duration-200 flex items-center gap-2">
-            <span>{scanStatus || "Processing..."}</span>
+            <span>{effectiveStatus || "Processing..."}</span>
             {elapsedMs >= 5_000 && (
-              <span className="text-xs opacity-60 tabular-nums">
+              <span className="text-xs opacity-60 tabular-nums" aria-hidden="true">
                 {Math.floor(elapsedMs / 60_000) > 0
                   ? `${Math.floor(elapsedMs / 60_000)}m ${Math.floor((elapsedMs % 60_000) / 1_000)}s`
                   : `${Math.floor(elapsedMs / 1_000)}s`}
@@ -488,7 +466,7 @@ export function ScanForm() {
         </span>
       </button>
 
-      {isSubmitting && isLikelyWaf && (
+      {isSubmitting && showWafBanner && (
         <div
           className="mt-3 p-3 rounded-lg bg-blue-50 dark:bg-blue-950/40 border border-blue-300 dark:border-blue-700 text-blue-800 dark:text-blue-200 text-sm flex items-start gap-2.5 animate-in fade-in slide-in-from-top-2 duration-300"
           role="status"
@@ -504,19 +482,20 @@ export function ScanForm() {
             <p className="font-medium">This site may be behind a firewall</p>
             <p className="mt-1 text-blue-700 dark:text-blue-300/80">
               We&apos;re automatically trying to bypass it. WAF-protected sites can take up to 4 minutes to scan.
-              You can leave this tab open — results will appear when ready.
+              You can switch tabs or apps — your results will be saved automatically.
             </p>
           </div>
         </div>
       )}
 
-      {/* Live region for screen reader scan-progress announcements */}
-      <div className="sr-only" aria-live="assertive" aria-atomic="true">
-        {isSubmitting ? scanStatus || "Scan in progress…" : ""}
-      </div>
-      <div className="sr-only" aria-live="polite">
-        {isSubmitting && isLikelyWaf
-          ? "This site appears to be behind a firewall. Bypass in progress — this can take up to 4 minutes."
+      {/* SR progress announcement — quantized to 10s intervals */}
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {isSubmitting
+          ? (() => {
+              const srElapsedMs = Math.floor(elapsedMs / SR_ANNOUNCE_INTERVAL_MS) * SR_ANNOUNCE_INTERVAL_MS;
+              const timeStr = srElapsedMs >= 5_000 ? `, ${formatElapsedSpoken(srElapsedMs)}` : "";
+              return `${effectiveStatus || "Scan in progress…"}${timeStr}`;
+            })()
           : ""}
       </div>
     </form>

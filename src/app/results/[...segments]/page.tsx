@@ -5,7 +5,7 @@ import { api } from "../../../../convex/_generated/api";
 import { Id } from "../../../../convex/_generated/dataModel";
 import { GradeBadge } from "@/components/GradeBadge";
 import { ViolationCard } from "@/components/ViolationCard";
-import { StatusIndicator } from "@/components/StatusIndicator";
+import { ScanProgressDisplay } from "@/components/ScanProgressDisplay";
 import { calculateGrade, calculateCombinedGrade, GRADING_VERSION } from "@/lib/grading";
 import { generateMarkdownReport, type AxeViolation, type ReportData } from "@/lib/report";
 import { buildResultsUrl, parseResultsSegments } from "@/lib/urls";
@@ -532,6 +532,27 @@ export default function ResultsPage({
     }
   }, [isLegacy, audit, router]);
 
+  // Announce scan completion to interrupt queued polite progress announcements
+  const prevStatusRef = useRef(audit?.status);
+  useEffect(() => {
+    const prev = prevStatusRef.current;
+    prevStatusRef.current = audit?.status;
+    if (audit?.status === "complete" && prev && prev !== "complete") {
+      const el = document.createElement("div");
+      el.setAttribute("aria-live", "assertive");
+      el.setAttribute("aria-atomic", "true");
+      el.className = "sr-only";
+      el.style.cssText =
+        "position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)";
+      document.body.appendChild(el);
+      requestAnimationFrame(() => {
+        const total = audit.violations.total;
+        el.textContent = `Scan complete. ${total} accessibility ${total === 1 ? "issue" : "issues"} found.`;
+      });
+      setTimeout(() => el.remove(), 5_000);
+    }
+  }, [audit?.status, audit?.violations?.total]);
+
   // Lazy recalculation: update grade if using outdated algorithm
   useEffect(() => {
     if (
@@ -656,7 +677,11 @@ export default function ResultsPage({
               </p>
             </div>
 
-            <StatusIndicator status={audit.status} />
+            <ScanProgressDisplay
+              message={audit.scanProgress}
+              scannedAt={audit.scannedAt}
+              fallbackMessage={audit.status === "scanning" ? "Scanning..." : "Queued..."}
+            />
 
             <p className="text-sm text-theme-muted mt-6">
               This page will update automatically when the scan is complete.

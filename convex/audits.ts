@@ -153,6 +153,18 @@ export const getUserAudits = query({
   },
 });
 
+// Lightweight progress update — called by the server during long-running scans.
+// No ownership check: server-only, worst case a spoofed update is cosmetic.
+export const updateScanProgress = mutation({
+  args: {
+    auditId: v.id("audits"),
+    scanProgress: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.auditId, { scanProgress: args.scanProgress });
+  },
+});
+
 // Update audit status
 export const updateAuditStatus = mutation({
   args: {
@@ -167,7 +179,12 @@ export const updateAuditStatus = mutation({
   },
   handler: async (ctx, args) => {
     await verifyAuditOwnership(ctx, args.auditId);
-    await ctx.db.patch(args.auditId, { status: args.status });
+    const patch: Record<string, unknown> = { status: args.status };
+    if (args.status === "scanning") {
+      patch.scannedAt = Date.now();
+      patch.scanProgress = undefined;
+    }
+    await ctx.db.patch(args.auditId, patch);
   },
 });
 

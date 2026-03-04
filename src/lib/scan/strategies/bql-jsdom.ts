@@ -346,7 +346,7 @@ export class BqlJsdomStrategy implements ScanStrategy {
     const scanStart = Date.now();
     const fetchResult = await this.fetchHtml(url, opts.timeBudgetMs, {
       screenshot: opts.captureScreenshot,
-    });
+    }, opts.onProgress);
 
     // Retry if any screenshot is missing. BQL sometimes returns mobile but
     // not desktop (or vice versa) due to timing/render races.
@@ -477,6 +477,7 @@ export class BqlJsdomStrategy implements ScanStrategy {
     url: string,
     timeBudgetMs: number,
     queryOpts: BqlQueryOptions = {},
+    onProgress?: (message: string) => void,
   ): Promise<{ content: string; pageTitle: string; screenshotBase64: string | null; mobileScreenshotBase64: string | null }> {
     const deadline = Date.now() + timeBudgetMs;
 
@@ -495,6 +496,10 @@ export class BqlJsdomStrategy implements ScanStrategy {
         Math.floor((remaining - 3_000) / stepsLeft),
         DEFAULT_BQL_TIMEOUT_MS,
       );
+
+      if (i > 0) {
+        onProgress?.(`waf:Firewall bypass — trying ${step.label}...`);
+      }
 
       try {
         console.log(`[BQL] ${step.label} → ${url} (${Math.round(stepTimeout / 1000)}s budget)`);
