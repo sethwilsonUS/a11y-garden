@@ -132,17 +132,24 @@ export async function POST(request: NextRequest) {
 
       // ---- Real-time progress emitter -----------------------------------------
       const emitProgress = async (msg: string) => {
-        if (!auditId) return;
+        if (!auditId) {
+          console.warn(`[Scan] emitProgress skipped (no auditId): "${msg}"`);
+          return;
+        }
         try {
           const c = getConvexClient(convexToken);
-          if (!c) return;
+          if (!c) {
+            console.warn(`[Scan] emitProgress skipped (no Convex client): "${msg}"`);
+            return;
+          }
           await c.mutation(api.audits.updateScanProgress, {
             auditId,
             scanProgress: msg,
           });
+          console.warn(`[Scan] emitProgress OK: "${msg}"`);
         } catch (err) {
           console.warn(
-            `[Scan] emitProgress failed for "${msg}":`,
+            `[Scan] emitProgress FAILED for "${msg}":`,
             err instanceof Error ? err.message : err,
           );
         }
