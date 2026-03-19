@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   MAX_RAW_FINDINGS_CHARS,
   getFindingNodeCount,
+  inferHeuristicImpact,
   truncateFindings,
   type AuditFinding,
 } from "./findings";
@@ -115,5 +116,19 @@ describe("truncateFindings", () => {
     truncateFindings(findings);
 
     expect(findings).toEqual(original);
+  });
+});
+
+describe("inferHeuristicImpact", () => {
+  it("keeps high-risk needs-review findings in the serious bucket when WCAG criteria indicate it", () => {
+    expect(
+      inferHeuristicImpact("heading-order", ["1.3.1"], "needs-review"),
+    ).toBe("serious");
+  });
+
+  it("allows lower-risk needs-review findings to land in the minor bucket", () => {
+    expect(
+      inferHeuristicImpact("page-title", ["2.4.2"], "needs-review"),
+    ).toBe("minor");
   });
 });

@@ -9,6 +9,7 @@ import {
   normalizeWcagCriterion,
   type AuditFinding,
   type FindingDisposition,
+  type FindingImpact,
 } from "@/lib/findings";
 import { getAceSource } from "./source-cache";
 
@@ -109,6 +110,28 @@ function aceDispositionFromValue(value: string[] | undefined): FindingDispositio
   return "needs-review";
 }
 
+function softenImpactByOneLevel(impact: FindingImpact): FindingImpact {
+  if (impact === "serious") return "moderate";
+  if (impact === "moderate") return "minor";
+  return "minor";
+}
+
+function inferAceImpact(
+  result: AceRawResult,
+  wcagCriteria: string[],
+  disposition: FindingDisposition,
+): FindingImpact {
+  const base = inferHeuristicImpact(result.ruleId, wcagCriteria, disposition);
+  if (disposition !== "needs-review") return base;
+
+  const policy = result.value?.[0];
+  if (policy && policy !== "VIOLATION") {
+    return softenImpactByOneLevel(base);
+  }
+
+  return base;
+}
+
 function normalizeAceResults(results: AceRawResult[]): AuditFinding[] {
   const grouped = new Map<string, AuditFinding>();
 
@@ -139,11 +162,7 @@ function normalizeAceResults(results: AceRawResult[]): AuditFinding[] {
       engines: ["ace"],
       engineRuleIds: { ace: [engineRuleId] },
       disposition,
-      impact: inferHeuristicImpact(
-        result.ruleId,
-        metadata.wcagCriteria,
-        disposition,
-      ),
+      impact: inferAceImpact(result, metadata.wcagCriteria, disposition),
       help: metadata.groupMessage ?? result.message ?? result.ruleId,
       description: result.message ?? metadata.groupMessage ?? result.ruleId,
       ...(metadata.helpUrl ? { helpUrl: metadata.helpUrl } : {}),

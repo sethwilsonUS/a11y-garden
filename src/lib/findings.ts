@@ -207,15 +207,10 @@ export function extractWcagCriteriaFromHtmlcsCode(
   return [...criteria].sort();
 }
 
-export function inferHeuristicImpact(
+function baseHeuristicImpact(
   ruleId: string,
   wcagCriteria: string[],
-  disposition: FindingDisposition,
 ): FindingImpact {
-  if (disposition === "needs-review") {
-    return "moderate";
-  }
-
   if (wcagCriteria.some((criterion) => SERIOUS_CRITERIA.has(criterion))) {
     return "serious";
   }
@@ -229,6 +224,18 @@ export function inferHeuristicImpact(
   }
 
   return "moderate";
+}
+
+export function inferHeuristicImpact(
+  ruleId: string,
+  wcagCriteria: string[],
+  disposition: FindingDisposition,
+): FindingImpact {
+  if (disposition === "needs-review") {
+    return baseHeuristicImpact(ruleId, wcagCriteria);
+  }
+
+  return baseHeuristicImpact(ruleId, wcagCriteria);
 }
 
 function dedupeFindingNodes(
