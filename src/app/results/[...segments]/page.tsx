@@ -20,6 +20,7 @@ import { ScreenshotSection } from "@/components/ScreenshotSection";
 import { AgentPlanButton } from "@/components/AgentPlanButton";
 import { ButtonCard } from "@/components/ButtonCard";
 import { track } from "@/lib/analytics";
+import { useAuthRedirectUrl } from "@/lib/auth-redirect";
 import { FindingDetailsAccordion } from "@/components/FindingDetailsAccordion";
 import { EngineSummaryAccordion } from "@/components/EngineSummaryAccordion";
 
@@ -269,6 +270,7 @@ export default function ResultsPage({
   const { auditId, isLegacy } = parseResultsSegments(segments);
   const router = useRouter();
   const searchParams = useSearchParams();
+  const authRedirectUrl = useAuthRedirectUrl();
   const { userId } = useAuth();
   const openedFromExtension = searchParams.get("source") === "extension";
   const typedAuditId = auditId as Id<"audits">;
@@ -824,7 +826,11 @@ export default function ResultsPage({
                     ? "Sign in, then reopen this result from the extension to claim it into your dashboard. Unclaimed extension scans cannot be shared."
                     : "Sign in to save results to your dashboard, track improvements over time, and share in the community garden."}
                 </p>
-                <SignInButton mode="modal">
+                <SignInButton
+                  mode="redirect"
+                  forceRedirectUrl={authRedirectUrl}
+                  signUpForceRedirectUrl={authRedirectUrl}
+                >
                   <button className="btn-primary text-sm py-2 px-4 cursor-pointer">
                     {isExtensionAudit ? "Sign In to Claim" : "Sign In to Save"}
                   </button>

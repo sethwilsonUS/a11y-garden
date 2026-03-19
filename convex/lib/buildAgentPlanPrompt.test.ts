@@ -133,8 +133,28 @@ describe("buildAgentPlanPrompt", () => {
       });
 
       expect(result.userPrompt).toContain("Confirmed by: axe-core, IBM ACE");
+      expect(result.userPrompt).toContain("Confidence: Strong signal: confirmed by multiple engines");
       expect(result.userPrompt).toContain("Viewports: desktop and mobile");
       expect(result.userPrompt).toContain("Viewports: mobile");
+    });
+
+    it("adds a verify-first confidence hint for single-engine ACE or HTMLCS findings", () => {
+      const result = buildAgentPlanPrompt({
+        ...BASE_INPUT,
+        violations: [
+          makeGroupedViolation({
+            ruleId: "label-ref-valid",
+            engines: ["ace"],
+          }),
+          makeGroupedViolation({
+            ruleId: "heading-order",
+            engines: ["htmlcs"],
+          }),
+        ],
+      });
+
+      expect(result.userPrompt).toContain("Verify-first signal: reported only by IBM ACE");
+      expect(result.userPrompt).toContain("Verify-first signal: reported only by HTML_CodeSniffer");
     });
 
     it("userPrompt includes the target URL and audit date", () => {
@@ -161,6 +181,21 @@ describe("buildAgentPlanPrompt", () => {
       expect(result.systemPrompt).toContain("Verification");
       expect(result.systemPrompt).toContain("Don't");
     });
+
+    it("systemPrompt includes guidance for rendered/source mismatches and computed styles", () => {
+      const result = buildAgentPlanPrompt(BASE_INPUT);
+
+      expect(result.systemPrompt).toContain("rendered DOM and source code do not always map 1:1");
+      expect(result.systemPrompt).toContain("rendered HTML, not source JSX");
+      expect(result.systemPrompt).toContain("combine them into one remediation item");
+      expect(result.systemPrompt).toContain("same user-facing defect");
+      expect(result.systemPrompt).toContain("specific state or variant");
+      expect(result.systemPrompt).toContain("document title findings");
+      expect(result.systemPrompt).toContain("framework's existing head or metadata mechanism");
+      expect(result.systemPrompt).toContain("reported only by IBM ACE or HTML_CodeSniffer");
+      expect(result.systemPrompt).toContain("verify computed foreground/background colors and the CSS cascade");
+      expect(result.systemPrompt).toContain("prefer removing the invalid value or using a conservative safe value");
+    });
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -168,14 +203,14 @@ describe("buildAgentPlanPrompt", () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe("size constraint", () => {
-    it("total prompt length stays under 12000 characters", () => {
+    it("total prompt length stays under 16000 characters", () => {
       const result = buildAgentPlanPrompt(BASE_INPUT);
       const totalLength = result.systemPrompt.length + result.userPrompt.length;
 
-      expect(totalLength).toBeLessThan(12000);
+      expect(totalLength).toBeLessThan(16000);
     });
 
-    it("stays under 12000 characters even with many violations", () => {
+    it("stays under 16000 characters even with many violations", () => {
       const violations = Array.from({ length: 30 }, (_, i) =>
         makeGroupedViolation({
           ruleId: `rule-${i}`,
@@ -189,7 +224,7 @@ describe("buildAgentPlanPrompt", () => {
       const result = buildAgentPlanPrompt({ ...BASE_INPUT, violations });
       const totalLength = result.systemPrompt.length + result.userPrompt.length;
 
-      expect(totalLength).toBeLessThan(12000);
+      expect(totalLength).toBeLessThan(16000);
     });
 
     it("includes coverage notes when the prompt only includes a subset of grouped issues", () => {
@@ -203,6 +238,22 @@ describe("buildAgentPlanPrompt", () => {
       expect(result.userPrompt).toContain("Grouped issues included in this prompt: 2 of 40 grouped issues");
       expect(result.userPrompt).toContain("## Coverage Notes");
       expect(result.userPrompt).toContain("Desktop engine coverage was partial");
+    });
+
+    it("includes verification-first instructions for DOM/source mismatches and safe form attribute fixes", () => {
+      const result = buildAgentPlanPrompt(BASE_INPUT);
+
+      expect(result.userPrompt).toContain("inspect the rendered DOM first");
+      expect(result.userPrompt).toContain("rendered HTML, not JSX source");
+      expect(result.userPrompt).toContain("convert `for` to `htmlFor` unless actual source code is provided");
+      expect(result.userPrompt).toContain("verify computed styles");
+      expect(result.userPrompt).toContain("merge them into one remediation item");
+      expect(result.userPrompt).toContain("same component family or the same user-facing defect");
+      expect(result.userPrompt).toContain("conditional on auth, UI state, or viewport");
+      expect(result.userPrompt).toContain("document title findings");
+      expect(result.userPrompt).toContain("verify the rendered `<head>` before proposing a source change");
+      expect(result.userPrompt).toContain("reported only by IBM ACE or HTML_CodeSniffer");
+      expect(result.userPrompt).toContain("autocomplete=\"off\"");
     });
   });
 

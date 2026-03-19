@@ -85,6 +85,22 @@ async function getAccessibleAudit(
   return (await canViewerAccessAudit(ctx, audit, rawViewToken)) ? audit : null;
 }
 
+function isLocalDevAuditUrl(rawUrl: string | undefined): boolean {
+  if (!rawUrl) return false;
+
+  try {
+    const hostname = new URL(rawUrl).hostname.toLowerCase();
+    return (
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname === "[::1]" ||
+      hostname.endsWith(".localhost")
+    );
+  } catch {
+    return false;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Mutations
 // ---------------------------------------------------------------------------
@@ -394,7 +410,9 @@ export const updateAuditWithResults = mutation({
           if (previous.mobileTopIssues) reused.mobileTopIssues = previous.mobileTopIssues;
         }
 
-        if (previous.agentPlanFileId) {
+        // In local development, localhost scans should always regenerate AGENTS.md
+        // so prompt and formatting tweaks are reflected immediately.
+        if (previous.agentPlanFileId && !isLocalDevAuditUrl(audit.url)) {
           reused.agentPlanFileId = previous.agentPlanFileId;
           reused.agentPlanGeneratedAt = previous.agentPlanGeneratedAt;
         }

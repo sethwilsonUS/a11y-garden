@@ -21,6 +21,7 @@ export const CMS_PLATFORMS = new Set([
   "drupal", "joomla", "ghost", "hubspot", "weebly",
 ]);
 const AGENT_PLAN_MODEL = "gpt-5.4-mini";
+const AGENT_PLAN_MAX_COMPLETION_TOKENS = 6144;
 
 function getOpenAIClient() {
   const apiKey = process.env.OPENAI_API_KEY;
@@ -40,9 +41,9 @@ export interface AgentPlanDeps {
   storageStore: (blob: Blob) => Promise<unknown>;
   openaiCreate: (params: {
     model: string;
-    messages: Array<{ role: string; content: string }>;
-    temperature: number;
-    max_completion_tokens: number;
+      messages: Array<{ role: string; content: string }>;
+      temperature: number;
+      max_completion_tokens: number;
   }) => Promise<{ choices: Array<{ message: { content: string | null } }> }>;
 }
 
@@ -199,7 +200,7 @@ export async function generateAgentPlanCore(
         { role: "user", content: userPrompt },
       ],
       temperature: 0.3,
-      max_completion_tokens: 4096,
+      max_completion_tokens: AGENT_PLAN_MAX_COMPLETION_TOKENS,
     });
 
     const agentPlanMd = completion.choices[0]?.message?.content;

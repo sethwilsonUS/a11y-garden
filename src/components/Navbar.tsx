@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { SignInButton, SignUpButton, UserButton, useAuth } from "@clerk/nextjs";
 import { ThemeToggle } from "./ThemeToggle";
+import { useAuthRedirectUrl } from "@/lib/auth-redirect";
 import { getNavLinks } from "@/lib/nav-links";
 import { isLocalMode } from "@/lib/mode";
 
@@ -39,6 +40,7 @@ function LeafLogo({ className }: { className?: string }) {
  */
 function AuthControls() {
   const pathname = usePathname();
+  const authRedirectUrl = useAuthRedirectUrl();
   const { isSignedIn, isLoaded } = useAuth();
 
   const isActive = (href: string) => pathname.startsWith(href);
@@ -80,12 +82,20 @@ function AuthControls() {
 
   return (
     <>
-      <SignInButton mode="modal">
+      <SignInButton
+        mode="redirect"
+        forceRedirectUrl={authRedirectUrl}
+        signUpForceRedirectUrl={authRedirectUrl}
+      >
         <button className="px-3 sm:px-4 py-2 rounded-lg text-sm font-medium text-theme-secondary hover:text-theme-primary hover:bg-theme-tertiary transition-all duration-200 cursor-pointer whitespace-nowrap">
           Sign In
         </button>
       </SignInButton>
-      <SignUpButton mode="modal">
+      <SignUpButton
+        mode="redirect"
+        forceRedirectUrl={authRedirectUrl}
+        signInForceRedirectUrl={authRedirectUrl}
+      >
         <button className="btn-primary text-sm py-2 cursor-pointer whitespace-nowrap">
           Sign Up
         </button>

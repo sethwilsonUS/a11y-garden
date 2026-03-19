@@ -75,6 +75,145 @@
     "4_1_2_attribute": "attribute",
   };
 
+  // Keep this heuristic broadly aligned with src/lib/platforms.ts so extension
+  // audits get the same framework/CMS affordances as web and CLI scans.
+  function detectPlatformFromHtml(rawHtml) {
+    const html = String(rawHtml || "").toLowerCase();
+
+    const matched = function () {
+      for (const pattern of arguments) {
+        if (html.includes(pattern)) return pattern;
+      }
+      return undefined;
+    };
+
+    let signal;
+
+    if (
+      (signal = matched(
+        'content="wordpress', "wp-content/", "wp-includes/",
+        "wp-json", "wp-emoji", "wp-block-",
+        "wordpress.com", "wpvip.com", "wordpress vip",
+        "powered by wordpress"
+      ))
+    ) return "wordpress";
+
+    if (
+      (signal = matched(
+        'content="drupal', "drupal.js", "/sites/default/files",
+        "drupal.org", "drupal.settings", "data-drupal-",
+        "/core/misc/drupal.js", "/modules/system/",
+        "views-row", "field-name-"
+      ))
+    ) return "drupal";
+
+    if (
+      (signal = matched(
+        'content="joomla', "/media/jui/", "/media/system/js/",
+        "/components/com_", "/modules/mod_",
+        "joomla!", "task="
+      ))
+    ) return "joomla";
+
+    if (
+      (signal = matched(
+        'content="ghost', "ghost.org", "ghost.io",
+        "/ghost/api/", "ghost-portal", "ghost-search",
+        "data-ghost-", "gh-head", "gh-portal",
+        "powered by ghost"
+      ))
+    ) return "ghost";
+
+    if (
+      (signal = matched(
+        "squarespace.com", "squarespace-cdn.com", "sqsp.net",
+        "data-squarespace", "sqs-block", "sqs-layout",
+        "sqs-announcement-bar", "sqs-slide-wrapper",
+        "this is squarespace"
+      ))
+    ) return "squarespace";
+
+    if (
+      (signal = matched(
+        "cdn.shopify.com", "myshopify.com",
+        "shopify.theme", "shopify-section",
+        "shopify-payment", "shopify-features",
+        "data-shopify", "shopify-app"
+      ))
+    ) return "shopify";
+
+    if (
+      (signal = matched(
+        "static.wixstatic.com", "parastorage.com",
+        "x-wix-", "data-mesh-id",
+        "wixui-", "wix-thunderbolt"
+      ))
+    ) return "wix";
+
+    if (
+      (signal = matched(
+        "webflow.com", "website-files.com",
+        "wf-design", "w-webflow-badge",
+        "data-wf-site", "data-wf-page"
+      ))
+    ) return "webflow";
+
+    if (
+      (signal = matched(
+        "hubspot-topic", "hs-menu-wrapper",
+        "hs_cos_wrapper", "powered by hubspot"
+      ))
+    ) return "hubspot";
+
+    if (
+      (signal = matched(
+        "weebly.com", "editmysite.com",
+        "wsite-", "weebly-",
+        "data-wsite-", "weeblycloud.com",
+        "powered by weebly"
+      ))
+    ) return "weebly";
+
+    if ((signal = matched('id="__next"', "__next_css__", "/_next/", "_next/static"))) {
+      return "nextjs";
+    }
+
+    if ((signal = matched('id="__nuxt"', "__nuxt_page", "/_nuxt/", "nuxt.config"))) {
+      return "nuxt";
+    }
+
+    if ((signal = matched('id="___gatsby"', "/gatsby-", "gatsby-image", "gatsby-plugin"))) {
+      return "gatsby";
+    }
+
+    if ((signal = matched("ng-version=", "ng-app", "ng-controller", "_ngcontent-"))) {
+      return "angular";
+    }
+
+    if ((signal = matched('id="remix-"', "__remix", "remix-run", "data-remix"))) {
+      return "remix";
+    }
+
+    if ((signal = matched("astro-island", "astro-slot", "data-astro-"))) {
+      return "astro";
+    }
+
+    if ((signal = matched("data-reactroot", "data-reactid", "__react"))) {
+      return "react";
+    }
+
+    if ((signal = matched("data-v-", "__vue", "vue-app", 'id="app" data-v-'))) {
+      return "vue";
+    }
+
+    if (html.match(/class="[^"]*svelte-[a-z0-9]/)) {
+      return "svelte";
+    }
+
+    void signal;
+    return undefined;
+  }
+
   function normalizeTextToken(value) {
     return String(value || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
   }
@@ -669,6 +808,9 @@
     const findings = [];
     const summaries = [];
     let scanModeInfo = { mode: "full", rulesRun: 0, skippedCategories: [] };
+    const platform = detectPlatformFromHtml(
+      document.documentElement ? document.documentElement.outerHTML : "",
+    );
 
     const axeStart = Date.now();
     try {
@@ -727,6 +869,7 @@
     return {
       url: window.location.href,
       pageTitle: document.title || window.location.hostname,
+      ...(platform ? { platform } : {}),
       engineProfile,
       findingsVersion: 2,
       rawFindings: JSON.stringify(deduplicated),

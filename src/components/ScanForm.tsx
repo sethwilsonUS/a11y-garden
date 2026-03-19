@@ -6,6 +6,7 @@ import { SignInButton, useAuth } from "@clerk/nextjs";
 import { api } from "../../convex/_generated/api";
 import { useRouter } from "next/navigation";
 import { Id } from "../../convex/_generated/dataModel";
+import { useAuthRedirectUrl } from "@/lib/auth-redirect";
 import { buildResultsUrl } from "@/lib/urls";
 import { track } from "@/lib/analytics";
 import type { EngineProfile } from "@/lib/findings";
@@ -102,6 +103,7 @@ function useScanProgress() {
 
 export function ScanForm() {
   const { isSignedIn } = useAuth();
+  const authRedirectUrl = useAuthRedirectUrl();
   const [url, setUrl] = useState("");
   const [isPublic, setIsPublic] = useState(false);
   const [engineProfile, setEngineProfile] = useState<EngineProfile>("strict");
@@ -373,7 +375,7 @@ export function ScanForm() {
             inputMode="url"
             autoCapitalize="off"
             autoCorrect="off"
-            autoComplete="url"
+            autoComplete="off"
             spellCheck={false}
             value={url}
             onChange={(e) => setUrl(e.target.value)}
@@ -516,40 +518,45 @@ export function ScanForm() {
 
       {isSignedIn && (
         <div className="flex items-center gap-3 p-4 bg-theme-secondary rounded-xl border border-theme">
+          <input
+            type="checkbox"
+            id="isPublic"
+            name="isPublic"
+            checked={isPublic}
+            onChange={(e) => setIsPublic(e.target.checked)}
+            disabled={isSubmitting}
+            className="peer sr-only"
+          />
           <label
             htmlFor="isPublic"
-            className={`flex items-center gap-3 text-sm text-theme-secondary select-none ${
+            className={`flex flex-1 items-center gap-3 rounded-lg text-sm text-theme-secondary select-none transition-colors ${
               isSubmitting ? "opacity-50 cursor-not-allowed" : "cursor-pointer"
-            }`}
+            } peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-[var(--accent)]`}
           >
-            <input
-              type="checkbox"
-              id="isPublic"
-              checked={isPublic}
-              onChange={(e) => setIsPublic(e.target.checked)}
-              disabled={isSubmitting}
-              className="sr-only peer"
-            />
             <span
               aria-hidden="true"
-              className="flex-shrink-0 w-5 h-5 rounded-[5px] border-[2.5px] border-[var(--text-primary)] flex items-center justify-center transition-colors duration-150 peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-[var(--accent)]"
+              className={`flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-[5px] border-[2.5px] transition-colors duration-150 ${
+                isPublic
+                  ? "border-[var(--accent)] bg-[var(--accent)] text-white"
+                  : "border-[var(--text-primary)] bg-theme-primary text-transparent"
+              }`}
             >
-              {isPublic && (
-                <svg
-                  className="w-3.5 h-3.5 text-[var(--text-primary)]"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="3"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <path d="M3 8.5L6.5 12L13 4" />
-                </svg>
-              )}
+              <svg
+                className={`h-3.5 w-3.5 transition-opacity duration-150 ${
+                  isPublic ? "opacity-100" : "opacity-0"
+                }`}
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="3"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M3 8.5L6.5 12L13 4" />
+              </svg>
             </span>
-            Share results in the community garden (public database)
+            <span>Share results in the community garden (public database)</span>
           </label>
         </div>
       )}
@@ -649,7 +656,11 @@ export function ScanForm() {
                 protected sites, AGENTS.md fix plans, and saved public audits.
               </p>
               <div className="mt-4 flex flex-wrap gap-3">
-                <SignInButton mode="modal">
+                <SignInButton
+                  mode="redirect"
+                  forceRedirectUrl={authRedirectUrl}
+                  signUpForceRedirectUrl={authRedirectUrl}
+                >
                   <button
                     type="button"
                     className="btn-primary text-sm py-2 cursor-pointer"
