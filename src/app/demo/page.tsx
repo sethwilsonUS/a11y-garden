@@ -217,7 +217,7 @@ export default function DemoPage() {
                   inputMode="url"
                   autoCapitalize="off"
                   autoCorrect="off"
-                  autoComplete="url"
+                  autoComplete="off"
                   spellCheck={false}
                   value={url}
                   onChange={(e) => setUrl(e.target.value)}

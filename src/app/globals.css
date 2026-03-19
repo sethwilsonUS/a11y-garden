@@ -34,6 +34,8 @@
   --btn-primary-bg: #036B4A;
   --btn-primary-hover: #065f46;
   --btn-primary-text: #ffffff;
+  --btn-primary-prominent-bg: #00875d;
+  --btn-primary-prominent-hover: #006b49;
 
   /* Severity — tuned for light backgrounds */
   --severity-critical: #dc2626;
@@ -94,6 +96,8 @@
   --btn-primary-bg: #059669;
   --btn-primary-hover: #047857;
   --btn-primary-text: #ffffff;
+  --btn-primary-prominent-bg: #047857;
+  --btn-primary-prominent-hover: #065f46;
 
   /* Severity — tuned for dark backgrounds */
   --severity-critical: #ef4444;
@@ -373,6 +377,22 @@ code, pre, .font-mono {
 .btn-primary:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.btn-primary-prominent {
+  padding: 1rem 2rem;
+  background-color: var(--btn-primary-prominent-bg);
+  color: #ffffff;
+  font-size: 1.125rem;
+  line-height: 1.75rem;
+}
+
+.btn-primary-prominent:hover {
+  background-color: var(--btn-primary-prominent-hover);
+}
+
+.btn-primary-prominent:focus-visible {
+  outline-color: var(--btn-primary-prominent-bg);
 }
 
 .btn-secondary {

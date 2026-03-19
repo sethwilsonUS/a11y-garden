@@ -90,13 +90,13 @@ describe("generateAgentPlanCore", () => {
       expect(callArgs.messages[1].content.length).toBeGreaterThan(0);
     });
 
-    it("sets temperature to 0.3 and max_completion_tokens to 4096", async () => {
+    it("sets temperature to 0.3 and max_completion_tokens to 6144", async () => {
       const deps = makeDeps();
       await generateAgentPlanCore(deps, { auditId: "audit-123" });
 
       const callArgs = deps.openaiCreate.mock.calls[0][0];
       expect(callArgs.temperature).toBe(0.3);
-      expect(callArgs.max_completion_tokens).toBe(4096);
+      expect(callArgs.max_completion_tokens).toBe(6144);
     });
 
     it("stores the generated markdown in Convex file storage", async () => {
