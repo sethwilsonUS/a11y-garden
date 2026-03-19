@@ -7,7 +7,7 @@ import { GradeBadge } from "@/components/GradeBadge";
 import { ViolationCard } from "@/components/ViolationCard";
 import { ScanProgressDisplay } from "@/components/ScanProgressDisplay";
 import { calculateGrade, calculateCombinedGrade, GRADING_VERSION } from "@/lib/grading";
-import { generateMarkdownReport, type AxeViolation, type ReportData } from "@/lib/report";
+import { generateMarkdownReport, type ReportData } from "@/lib/report";
 import { buildResultsUrl, parseResultsSegments } from "@/lib/urls";
 import { PLATFORM_LABELS, getPlatformConfidence } from "@/lib/platforms";
 import Link from "next/link";
@@ -20,6 +20,8 @@ import { ScreenshotSection } from "@/components/ScreenshotSection";
 import { AgentPlanButton } from "@/components/AgentPlanButton";
 import { ButtonCard } from "@/components/ButtonCard";
 import { track } from "@/lib/analytics";
+import { FindingDetailsAccordion } from "@/components/FindingDetailsAccordion";
+import { EngineSummaryAccordion } from "@/components/EngineSummaryAccordion";
 
 interface Audit extends ReportData {
   domain: string;
@@ -36,13 +38,11 @@ interface Audit extends ReportData {
   mobileTopIssues?: string[];
 }
 
-// Severity config using CSS vars
-const severityConfig = {
-  critical: { cssVar: "severity-critical", label: "Critical" },
-  serious: { cssVar: "severity-serious", label: "Serious" },
-  moderate: { cssVar: "severity-moderate", label: "Moderate" },
-  minor: { cssVar: "severity-minor", label: "Minor" },
-};
+function formatEngineProfile(profile?: string) {
+  if (profile === "comprehensive") return "Comprehensive";
+  if (profile === "strict") return "Strict";
+  return undefined;
+}
 
 function CopyReportButton({ audit }: { audit: Audit }) {
   const [copied, setCopied] = useState(false);
@@ -77,200 +77,6 @@ function CopyReportButton({ audit }: { audit: Audit }) {
         </>
       )}
     </button>
-  );
-}
-
-function DetailedViolationsAccordion({ rawViolations }: { rawViolations: string }) {
-  const [isOpen, setIsOpen] = useState(false);
-  const [expandedViolations, setExpandedViolations] = useState<Set<string>>(new Set());
-
-  let violations: AxeViolation[] = [];
-  try {
-    violations = JSON.parse(rawViolations);
-  } catch {
-    return null;
-  }
-
-  if (violations.length === 0) return null;
-
-  const severityOrder: Array<"critical" | "serious" | "moderate" | "minor"> = ["critical", "serious", "moderate", "minor"];
-  const grouped = severityOrder.reduce((acc, severity) => {
-    acc[severity] = violations.filter((v) => v.impact === severity);
-    return acc;
-  }, {} as Record<string, AxeViolation[]>);
-
-  const toggleViolation = (id: string) => {
-    setExpandedViolations((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  };
-
-  return (
-    <section className="garden-bed overflow-hidden">
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="w-full px-6 py-4 flex items-center justify-between bg-theme-secondary hover:bg-theme-tertiary transition-colors cursor-pointer rounded-t-2xl"
-        aria-expanded={isOpen}
-        aria-controls="detailed-violations-panel"
-      >
-        <div className="flex items-center gap-3">
-          <svg className="w-5 h-5 text-theme-secondary" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-          </svg>
-          <span className="font-display font-semibold text-theme-primary">
-            Detailed Violations
-          </span>
-          <span className="text-sm text-theme-muted">
-            ({violations.length} {violations.length === 1 ? "rule" : "rules"} violated)
-          </span>
-        </div>
-        <svg
-          className={`w-5 h-5 text-theme-secondary transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-          aria-hidden="true"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
-      </button>
-
-      {isOpen && (
-        <div id="detailed-violations-panel" className="p-6 space-y-6 bg-theme-primary border-t border-theme">
-          {severityOrder.map((severity) => {
-            const items = grouped[severity];
-            if (!items || items.length === 0) return null;
-            const config = severityConfig[severity];
-
-            return (
-              <div key={severity}>
-                <h3
-                  className="text-sm font-semibold uppercase tracking-wide mb-3"
-                  style={{ color: `var(--${config.cssVar})` }}
-                >
-                  {config.label} ({items.length})
-                </h3>
-                <div className="space-y-3">
-                  {items.map((violation) => {
-                    const isExpanded = expandedViolations.has(violation.id);
-                    return (
-                      <div
-                        key={violation.id}
-                        className="rounded-lg border overflow-hidden"
-                        style={{
-                          backgroundColor: `var(--${config.cssVar}-bg)`,
-                          borderColor: `var(--${config.cssVar}-border)`,
-                        }}
-                      >
-                        <button
-                          onClick={() => toggleViolation(violation.id)}
-                          className="w-full px-4 py-3 flex items-start justify-between text-left cursor-pointer hover:opacity-80 transition-opacity"
-                          aria-expanded={isExpanded}
-                          aria-controls={`violation-${violation.id}`}
-                        >
-                          <div className="flex-1 min-w-0">
-                            <p className="font-medium text-theme-primary">
-                              {violation.help}
-                            </p>
-                            <p className="text-sm text-theme-muted mt-1">
-                              <code className="text-xs bg-theme-tertiary px-1.5 py-0.5 rounded font-mono">
-                                {violation.id}
-                              </code>
-                              <span className="mx-2" aria-hidden="true">·</span>
-                              {violation.nodes.length} {violation.nodes.length === 1 ? "element" : "elements"} affected
-                            </p>
-                          </div>
-                          <svg
-                            className={`w-5 h-5 text-theme-muted flex-shrink-0 ml-2 transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`}
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                            aria-hidden="true"
-                          >
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                          </svg>
-                        </button>
-
-                        {isExpanded && (
-                          <div id={`violation-${violation.id}`} className="px-4 pb-4 space-y-4 border-t" style={{ borderColor: `var(--${config.cssVar}-border)` }}>
-                            <p className="text-sm text-theme-secondary pt-3">
-                              {violation.description}
-                            </p>
-                            <a
-                              href={violation.helpUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 text-sm text-accent hover:underline transition-colors"
-                            >
-                              Learn how to fix this
-                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                              </svg>
-                            </a>
-
-                            <div>
-                              <p className="text-xs font-semibold text-theme-muted uppercase tracking-wide mb-2">
-                                Affected Elements ({violation.nodes.length})
-                              </p>
-                              <div className="space-y-2 max-h-64 overflow-y-auto">
-                                {violation.nodes.slice(0, 10).map((node, idx) => {
-                                  const getFixInstructions = (summary: string | undefined) => {
-                                    if (!summary) return null;
-                                    const lines = summary.split("\n").map(l => l.trim()).filter(Boolean);
-                                    const instructions = lines.filter(
-                                      l => !l.match(/^Fix (all|any) of the following:?$/i)
-                                    );
-                                    return instructions.length > 0 ? instructions : null;
-                                  };
-
-                                  const fixInstructions = getFixInstructions(node.failureSummary);
-
-                                  return (
-                                    <div key={idx} className="bg-theme-tertiary rounded-lg p-3">
-                                      <pre className="text-xs text-theme-secondary overflow-x-auto whitespace-pre-wrap break-all font-mono">
-                                        {node.html}
-                                      </pre>
-                                      {fixInstructions && (
-                                        <div className="mt-2 pt-2 border-t border-theme">
-                                          <p className="text-xs font-medium text-theme-muted mb-1">How to fix:</p>
-                                          <ul className="text-xs text-theme-secondary space-y-1">
-                                            {fixInstructions.map((instruction, i) => (
-                                              <li key={i} className="flex items-start gap-2">
-                                                <span className="text-accent mt-0.5" aria-hidden="true">·</span>
-                                                <span>{instruction}</span>
-                                              </li>
-                                            ))}
-                                          </ul>
-                                        </div>
-                                      )}
-                                    </div>
-                                  );
-                                })}
-                                {violation.nodes.length > 10 && (
-                                  <p className="text-xs text-theme-muted text-center py-2">
-                                    ...and {violation.nodes.length - 10} more elements
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </section>
   );
 }
 
@@ -753,10 +559,17 @@ export default function ResultsPage({
                     Built with {PLATFORM_LABELS[audit.platform]}
                   </span>
                 )}
+                {formatEngineProfile(audit.engineProfile) && (
+                  <span className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full bg-theme-secondary border border-theme text-theme-secondary">
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7h16M4 12h16M4 17h16" />
+                    </svg>
+                    {formatEngineProfile(audit.engineProfile)} profile
+                  </span>
+                )}
                 <WafBadge
                   wafDetected={audit.wafDetected}
                   wafBypassed={audit.wafBypassed}
-                  scanStrategy={audit.scanStrategy}
                 />
               </div>
             </div>
@@ -975,6 +788,9 @@ export default function ResultsPage({
           {(() => {
             const isDesktop = activeViewport === "desktop" || !hasMobileData;
             const vpViolations = isDesktop ? audit.violations : (audit.mobileViolations ?? audit.violations);
+            const vpReviewViolations = isDesktop
+              ? audit.reviewViolations
+              : audit.mobileReviewViolations;
             const vpGrade = isDesktop ? audit.letterGrade : (audit.mobileLetterGrade ?? audit.letterGrade);
             const vpScore = isDesktop
               ? calculateGrade(audit.violations).score
@@ -992,7 +808,9 @@ export default function ResultsPage({
               : (audit.mobileTopIssues ?? (vpViolations.total === 0 ? audit.topIssues : undefined));
             // AI is "done" when the desktop summary exists (both are saved in a single mutation).
             const aiDone = !!audit.aiSummary;
+            const vpRawFindings = isDesktop ? audit.rawFindings : audit.mobileRawFindings;
             const vpRawViolations = isDesktop ? audit.rawViolations : audit.mobileRawViolations;
+            const vpEngineSummary = isDesktop ? audit.engineSummary : audit.mobileEngineSummary;
             const vpViewport: "desktop" | "mobile" = isDesktop ? "desktop" : "mobile";
 
             return (
@@ -1018,6 +836,13 @@ export default function ResultsPage({
                   scanModeDetail={vpScanModeDetail}
                   viewport={vpViewport}
                   totalViolations={vpViolations.total}
+                  engineProfile={audit.engineProfile}
+                />
+
+                <EngineSummaryAccordion
+                  engineProfile={audit.engineProfile}
+                  engineSummary={vpEngineSummary}
+                  headingLevel="h2"
                 />
 
                 {/* robots.txt Advisory */}
@@ -1054,7 +879,7 @@ export default function ResultsPage({
                     <div>
                       <h3 className="text-sm font-semibold mb-1" style={{ color: 'var(--severity-minor)' }}>Large Scan — Some Details Trimmed</h3>
                       <p className="text-sm text-theme-secondary">
-                        This site had a very large number of violations at the {isDesktop ? "desktop" : "mobile"} viewport. Some duplicate element examples were trimmed. Violation counts and grades are still accurate.
+                        This site had a very large number of findings at the {isDesktop ? "desktop" : "mobile"} viewport. Some verbose element details were trimmed and the detailed findings list shows representative examples. Counts and grades are still accurate.
                       </p>
                     </div>
                   </div>
@@ -1068,6 +893,18 @@ export default function ResultsPage({
                   <h2 className="text-xl font-display font-bold text-theme-primary mb-4">Issue Beds</h2>
                   <ViolationCard violations={vpViolations} />
                 </section>
+
+                {vpReviewViolations && vpReviewViolations.total > 0 && (
+                  <section>
+                    <h2 className="text-xl font-display font-bold text-theme-primary mb-2">
+                      Needs Review
+                    </h2>
+                    <p className="text-sm text-theme-secondary mb-4">
+                      These lower-confidence findings came from warning-level or manual-review signals. They do not affect the grade, but they are worth checking by hand.
+                    </p>
+                    <ViolationCard violations={vpReviewViolations} />
+                  </section>
+                )}
 
                 {/* AI Summary */}
                 <section className="garden-bed p-6 lg:p-8 bg-[var(--accent-bg)]" style={{ borderColor: 'var(--accent-border)' }}>
@@ -1091,7 +928,7 @@ export default function ResultsPage({
                           <p className="text-theme-secondary leading-relaxed">{vpAiSummary}</p>
                           <p className="text-xs text-theme-muted mt-3 flex items-center gap-1.5">
                             <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-                            Powered by OpenAI GPT-4.1 Mini
+                            Powered by OpenAI
                           </p>
                         </>
                       ) : aiDone ? (
@@ -1139,9 +976,26 @@ export default function ResultsPage({
                   </section>
                 ) : null}
 
-                {/* Detailed Violations Accordion */}
-                {vpRawViolations && vpViolations.total > 0 && (
-                  <DetailedViolationsAccordion rawViolations={vpRawViolations} />
+                {/* Detailed Findings Accordions */}
+                {(vpRawFindings || vpRawViolations) && vpViolations.total > 0 && (
+                  <FindingDetailsAccordion
+                    idPrefix={`${vpViewport}-confirmed`}
+                    rawFindings={vpRawFindings}
+                    rawViolations={vpRawViolations}
+                    disposition="confirmed"
+                    title="Confirmed Findings"
+                  />
+                )}
+
+                {(vpRawFindings || vpRawViolations) && (vpReviewViolations?.total ?? 0) > 0 && (
+                  <FindingDetailsAccordion
+                    idPrefix={`${vpViewport}-review`}
+                    rawFindings={vpRawFindings}
+                    rawViolations={vpRawViolations}
+                    disposition="needs-review"
+                    title="Needs Review Details"
+                    description="These items should be manually reviewed before treating them as confirmed defects."
+                  />
                 )}
               </div>
             );
@@ -1175,6 +1029,7 @@ export default function ResultsPage({
               agentPlanFileId={audit.agentPlanFileId as string | undefined}
               domain={audit.domain}
               isOwner={isOwner}
+              isSignedIn={!!userId}
             />
             <ButtonCard>
               <button

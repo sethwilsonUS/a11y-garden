@@ -20,6 +20,7 @@ interface ScanModeBannerProps {
   scanModeDetail?: string;
   viewport: "desktop" | "mobile";
   totalViolations?: number;
+  engineProfile?: "strict" | "comprehensive";
 }
 
 function parseScanModeDetail(raw?: string): ScanModeInfo | null {
@@ -53,7 +54,20 @@ function ChevronIcon({ open, className }: { open: boolean; className?: string })
   );
 }
 
-function FullScanBanner({ detail }: { detail: ScanModeInfo | null }) {
+function renderMultiEngineHint(engineProfile?: "strict" | "comprehensive") {
+  if (engineProfile !== "comprehensive") return "";
+  return " See Scan Engines below for the full multi-engine breakdown.";
+}
+
+function FullScanBanner({
+  detail,
+  viewport,
+  engineProfile,
+}: {
+  detail: ScanModeInfo | null;
+  viewport: "desktop" | "mobile";
+  engineProfile?: "strict" | "comprehensive";
+}) {
   const rulesRun = detail?.rulesRun ?? 0;
   return (
     <div
@@ -67,16 +81,25 @@ function FullScanBanner({ detail }: { detail: ScanModeInfo | null }) {
         </svg>
       </div>
       <div>
-        <h3 className="text-sm font-semibold mb-1 text-accent">Complete Scan</h3>
+        <h3 className="text-sm font-semibold mb-1 text-accent">Full axe-core scan</h3>
         <p className="text-sm text-theme-secondary">
-          All {rulesRun > 0 ? rulesRun : ""} accessibility rules checked.
+          axe-core completed {rulesRun > 0 ? rulesRun : ""} checks at the {viewport} viewport.
+          {renderMultiEngineHint(engineProfile)}
         </p>
       </div>
     </div>
   );
 }
 
-function SafeModeBanner({ detail, viewport }: { detail: ScanModeInfo | null; viewport: string }) {
+function SafeModeBanner({
+  detail,
+  viewport,
+  engineProfile,
+}: {
+  detail: ScanModeInfo | null;
+  viewport: "desktop" | "mobile";
+  engineProfile?: "strict" | "comprehensive";
+}) {
   const [expanded, setExpanded] = useState(false);
   const rulesRun = detail?.rulesRun ?? 0;
   const skipped = detail?.skippedCategories ?? [];
@@ -93,10 +116,10 @@ function SafeModeBanner({ detail, viewport }: { detail: ScanModeInfo | null; vie
         <ShieldIcon className="w-4 h-4" style={{ color: "var(--severity-moderate)" }} />
       </div>
       <div className="flex-1">
-        <h3 className="text-sm font-semibold mb-1" style={{ color: "var(--severity-moderate)" }}>Partial Scan</h3>
+        <h3 className="text-sm font-semibold mb-1" style={{ color: "var(--severity-moderate)" }}>Partial axe-core scan</h3>
         <p className="text-sm text-theme-secondary">
           {totalRules > 0
-            ? `${rulesRun} of ${totalRules} rules checked at the ${viewport} viewport. ${skippedRuleCount} rules skipped due to site complexity.`
+            ? `axe-core completed ${rulesRun} of ${totalRules} checks at the ${viewport} viewport. ${skippedRuleCount} axe-core checks were skipped due to site complexity.${renderMultiEngineHint(engineProfile)}`
             : `The ${viewport} scan ran in safe mode. Not all checks were performed.`}
         </p>
 
@@ -128,7 +151,15 @@ function SafeModeBanner({ detail, viewport }: { detail: ScanModeInfo | null; vie
   );
 }
 
-function StructuralScanBanner({ detail, totalViolations }: { detail: ScanModeInfo | null; totalViolations?: number }) {
+function StructuralScanBanner({
+  detail,
+  totalViolations,
+  engineProfile,
+}: {
+  detail: ScanModeInfo | null;
+  totalViolations?: number;
+  engineProfile?: "strict" | "comprehensive";
+}) {
   const [expanded, setExpanded] = useState(false);
   const rulesRun = detail?.rulesRun ?? 0;
   const skipped = detail?.skippedCategories ?? [];
@@ -145,11 +176,11 @@ function StructuralScanBanner({ detail, totalViolations }: { detail: ScanModeInf
         <ShieldIcon className="w-4 h-4" style={{ color: "var(--severity-moderate)" }} />
       </div>
       <div className="flex-1">
-        <h3 className="text-sm font-semibold mb-1" style={{ color: "var(--severity-moderate)" }}>Structural Scan</h3>
+        <h3 className="text-sm font-semibold mb-1" style={{ color: "var(--severity-moderate)" }}>Structural axe-core scan</h3>
         <p className="text-sm text-theme-secondary">
           {totalRules > 0
-            ? `This site\u2019s firewall required server-side analysis. ${rulesRun} of ${totalRules} rules checked.`
-            : "This site\u2019s firewall required server-side analysis. Some rules could not be checked."}
+            ? `This site's firewall required server-side analysis. axe-core completed ${rulesRun} of ${totalRules} structural checks.${engineProfile === "comprehensive" ? " Browser-dependent engines are summarized in Scan Engines below." : ""}`
+            : "This site's firewall required server-side analysis. Some rules could not be checked."}
         </p>
 
         {skipped.length > 0 && (
@@ -190,18 +221,24 @@ function StructuralScanBanner({ detail, totalViolations }: { detail: ScanModeInf
   );
 }
 
-export function ScanModeBanner({ scanMode, scanModeDetail, viewport, totalViolations }: ScanModeBannerProps) {
+export function ScanModeBanner({
+  scanMode,
+  scanModeDetail,
+  viewport,
+  totalViolations,
+  engineProfile,
+}: ScanModeBannerProps) {
   if (!scanMode || scanMode === "full") {
     const detail = parseScanModeDetail(scanModeDetail);
     if (!detail || detail.rulesRun === 0) return null;
-    return <FullScanBanner detail={detail} />;
+    return <FullScanBanner detail={detail} viewport={viewport} engineProfile={engineProfile} />;
   }
 
   const detail = parseScanModeDetail(scanModeDetail);
 
   if (scanMode === "jsdom-structural") {
-    return <StructuralScanBanner detail={detail} totalViolations={totalViolations} />;
+    return <StructuralScanBanner detail={detail} totalViolations={totalViolations} engineProfile={engineProfile} />;
   }
 
-  return <SafeModeBanner detail={detail} viewport={viewport} />;
+  return <SafeModeBanner detail={detail} viewport={viewport} engineProfile={engineProfile} />;
 }

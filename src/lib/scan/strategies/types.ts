@@ -1,4 +1,8 @@
-import type { ViolationCounts } from "@/lib/scanner";
+import type {
+  EngineProfile,
+  EngineSummary,
+  ViolationCounts,
+} from "@/lib/findings";
 
 // ---------------------------------------------------------------------------
 // Scan mode reporting
@@ -24,6 +28,7 @@ export interface ScanModeInfo {
 export interface ScanStrategyOptions {
   viewport: "desktop" | "mobile";
   captureScreenshot: boolean;
+  engineProfile: EngineProfile;
   /** Remaining ms before the Vercel function is killed */
   timeBudgetMs: number;
   /** BQL escalation requires authentication */
@@ -48,7 +53,11 @@ export interface ScanMetadata {
 
 export interface StrategyScanResult {
   violations: ViolationCounts;
-  rawViolations: string;
+  reviewViolations: ViolationCounts;
+  rawFindings: string;
+  findingsVersion: 2;
+  engineProfile: EngineProfile;
+  engineSummary: EngineSummary;
   truncated: boolean;
   scanMode: ScanModeInfo;
   screenshot?: Buffer;

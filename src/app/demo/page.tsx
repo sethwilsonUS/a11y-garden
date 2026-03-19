@@ -5,23 +5,10 @@ import Link from "next/link";
 import { GradeBadge } from "@/components/GradeBadge";
 import { ViolationCard } from "@/components/ViolationCard";
 import { SafeModeModal } from "@/components/SafeModeModal";
-import { AVAILABLE_MODELS, DEFAULT_AI_MODEL, formatModelPrice } from "@/lib/ai-summary";
-
-// Axe-core violation structure
-interface AxeNode {
-  html: string;
-  target: string[];
-  failureSummary?: string;
-}
-
-interface AxeViolation {
-  id: string;
-  impact?: "critical" | "serious" | "moderate" | "minor";
-  description: string;
-  help: string;
-  helpUrl: string;
-  nodes: AxeNode[];
-}
+import { AVAILABLE_MODELS, DEFAULT_AI_MODEL, formatModelPrice, getModelLabel } from "@/lib/ai-summary";
+import { FindingDetailsAccordion } from "@/components/FindingDetailsAccordion";
+import { EngineSummaryAccordion } from "@/components/EngineSummaryAccordion";
+import type { EngineProfile, EngineSummary } from "@/lib/findings";
 
 interface ScanResult {
   url: string;
@@ -33,9 +20,18 @@ interface ScanResult {
     minor: number;
     total: number;
   };
+  reviewViolations: {
+    critical: number;
+    serious: number;
+    moderate: number;
+    minor: number;
+    total: number;
+  };
   letterGrade: "A" | "B" | "C" | "D" | "F";
   score: number;
-  rawViolations: string;
+  rawFindings: string;
+  engineProfile: EngineProfile;
+  engineSummary?: EngineSummary;
   safeMode?: boolean;
   scannedAt: number;
   aiSummary?: string;
@@ -43,208 +39,6 @@ interface ScanResult {
   aiModel?: string;
   platform?: string;
   platformTip?: string;
-}
-
-// Severity config using CSS vars
-const severityConfig = {
-  critical: { cssVar: "severity-critical", label: "Critical" },
-  serious: { cssVar: "severity-serious", label: "Serious" },
-  moderate: { cssVar: "severity-moderate", label: "Moderate" },
-  minor: { cssVar: "severity-minor", label: "Minor" },
-};
-
-function DetailedViolationsAccordion({ rawViolations }: { rawViolations: string }) {
-  const [isOpen, setIsOpen] = useState(false);
-  const [expandedViolations, setExpandedViolations] = useState<Set<string>>(new Set());
-
-  let violations: AxeViolation[] = [];
-  try {
-    violations = JSON.parse(rawViolations);
-  } catch {
-    return null;
-  }
-
-  if (violations.length === 0) return null;
-
-  const severityOrder: Array<"critical" | "serious" | "moderate" | "minor"> = ["critical", "serious", "moderate", "minor"];
-  const grouped = severityOrder.reduce((acc, severity) => {
-    acc[severity] = violations.filter((v) => v.impact === severity);
-    return acc;
-  }, {} as Record<string, AxeViolation[]>);
-
-  const toggleViolation = (id: string) => {
-    setExpandedViolations((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  };
-
-  return (
-    <section className="garden-bed overflow-hidden">
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="w-full px-6 py-4 flex items-center justify-between bg-theme-secondary hover:bg-theme-tertiary transition-colors cursor-pointer rounded-t-2xl"
-        aria-expanded={isOpen}
-        aria-controls="demo-violations-panel"
-      >
-        <div className="flex items-center gap-3">
-          <svg className="w-5 h-5 text-theme-secondary" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" />
-          </svg>
-          <span className="font-display font-semibold text-theme-primary">
-            Detailed Violations
-          </span>
-          <span className="text-sm text-theme-muted">
-            ({violations.length} {violations.length === 1 ? "rule" : "rules"} violated)
-          </span>
-        </div>
-        <svg
-          className={`w-5 h-5 text-theme-secondary transition-transform duration-200 ${isOpen ? "rotate-180" : ""}`}
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-          aria-hidden="true"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-        </svg>
-      </button>
-
-      {isOpen && (
-        <div id="demo-violations-panel" className="p-6 space-y-6 bg-theme-primary border-t border-theme">
-          {severityOrder.map((severity) => {
-            const items = grouped[severity];
-            if (!items || items.length === 0) return null;
-            const config = severityConfig[severity];
-
-            return (
-              <div key={severity}>
-                <h3
-                  className="text-sm font-semibold uppercase tracking-wide mb-3"
-                  style={{ color: `var(--${config.cssVar})` }}
-                >
-                  {config.label} ({items.length})
-                </h3>
-                <div className="space-y-3">
-                  {items.map((violation) => {
-                    const isExpanded = expandedViolations.has(violation.id);
-                    return (
-                      <div
-                        key={violation.id}
-                        className="rounded-lg border overflow-hidden"
-                        style={{
-                          backgroundColor: `var(--${config.cssVar}-bg)`,
-                          borderColor: `var(--${config.cssVar}-border)`,
-                        }}
-                      >
-                        <button
-                          onClick={() => toggleViolation(violation.id)}
-                          className="w-full px-4 py-3 flex items-start justify-between text-left cursor-pointer hover:opacity-80 transition-opacity"
-                          aria-expanded={isExpanded}
-                          aria-controls={`demo-violation-${violation.id}`}
-                        >
-                          <div className="flex-1 min-w-0">
-                            <p className="font-medium text-theme-primary">
-                              {violation.help}
-                            </p>
-                            <p className="text-sm text-theme-muted mt-1">
-                              <code className="text-xs bg-theme-tertiary px-1.5 py-0.5 rounded font-mono">
-                                {violation.id}
-                              </code>
-                              <span className="mx-2" aria-hidden="true">·</span>
-                              {violation.nodes.length} {violation.nodes.length === 1 ? "element" : "elements"} affected
-                            </p>
-                          </div>
-                          <svg
-                            className={`w-5 h-5 text-theme-muted flex-shrink-0 ml-2 transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`}
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                            aria-hidden="true"
-                          >
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                          </svg>
-                        </button>
-
-                        {isExpanded && (
-                          <div id={`demo-violation-${violation.id}`} className="px-4 pb-4 space-y-4 border-t" style={{ borderColor: `var(--${config.cssVar}-border)` }}>
-                            <p className="text-sm text-theme-secondary pt-3">
-                              {violation.description}
-                            </p>
-                            <a
-                              href={violation.helpUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="inline-flex items-center gap-1 text-sm text-accent hover:underline transition-colors"
-                            >
-                              Learn how to fix this
-                              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                              </svg>
-                            </a>
-
-                            <div>
-                              <p className="text-xs font-semibold text-theme-muted uppercase tracking-wide mb-2">
-                                Affected Elements ({violation.nodes.length})
-                              </p>
-                              <div className="space-y-2 max-h-64 overflow-y-auto">
-                                {violation.nodes.slice(0, 10).map((node, idx) => {
-                                  const getFixInstructions = (summary: string | undefined) => {
-                                    if (!summary) return null;
-                                    const lines = summary.split("\n").map(l => l.trim()).filter(Boolean);
-                                    const instructions = lines.filter(
-                                      l => !l.match(/^Fix (all|any) of the following:?$/i)
-                                    );
-                                    return instructions.length > 0 ? instructions : null;
-                                  };
-
-                                  const fixInstructions = getFixInstructions(node.failureSummary);
-
-                                  return (
-                                    <div key={idx} className="bg-theme-tertiary rounded-lg p-3">
-                                      <pre className="text-xs text-theme-secondary overflow-x-auto whitespace-pre-wrap break-all font-mono">
-                                        {node.html}
-                                      </pre>
-                                      {fixInstructions && (
-                                        <div className="mt-2 pt-2 border-t border-theme">
-                                          <p className="text-xs font-medium text-theme-muted mb-1">How to fix:</p>
-                                          <ul className="text-xs text-theme-secondary space-y-1">
-                                            {fixInstructions.map((instruction, i) => (
-                                              <li key={i} className="flex items-start gap-2">
-                                                <span className="text-accent mt-0.5" aria-hidden="true">·</span>
-                                                <span>{instruction}</span>
-                                              </li>
-                                            ))}
-                                          </ul>
-                                        </div>
-                                      )}
-                                    </div>
-                                  );
-                                })}
-                                {violation.nodes.length > 10 && (
-                                  <p className="text-xs text-theme-muted text-center py-2">
-                                    ...and {violation.nodes.length - 10} more elements
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </section>
-  );
 }
 
 export default function DemoPage() {
@@ -305,25 +99,33 @@ export default function DemoPage() {
       const response = await fetch("/api/scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: normalizedUrl }),
+        body: JSON.stringify({ url: normalizedUrl, engineProfile: "strict" }),
       });
 
-      const scanResult = await response.json();
+      const scanPayload = await response.json();
 
       if (!response.ok) {
-        throw new Error(scanResult.error || "Scan failed");
+        throw new Error(scanPayload.error || "Scan failed");
+      }
+
+      const scanResult = scanPayload.desktop;
+      if (!scanResult) {
+        throw new Error("Desktop scan results were missing from the response");
       }
 
       const scanData: ScanResult = {
         url: normalizedUrl,
-        pageTitle: scanResult.pageTitle || undefined,
+        pageTitle: scanPayload.pageTitle || undefined,
         violations: scanResult.violations,
+        reviewViolations: scanResult.reviewViolations,
         letterGrade: scanResult.letterGrade,
         score: scanResult.score,
-        rawViolations: scanResult.rawViolations,
+        rawFindings: scanResult.rawFindings,
+        engineProfile: scanResult.engineProfile,
+        engineSummary: scanResult.engineSummary,
         safeMode: scanResult.safeMode,
         scannedAt: Date.now(),
-        ...(scanResult.platform && { platform: scanResult.platform }),
+        ...(scanPayload.platform && { platform: scanPayload.platform }),
       };
 
       setResult(scanData);
@@ -332,18 +134,18 @@ export default function DemoPage() {
       // If the user has OPENAI_API_KEY in .env.local the Next.js server can
       // generate an AI summary locally — same path the CLI uses. When the key
       // isn't set the endpoint returns 501 and we silently degrade.
-      if (scanResult.violations.total > 0) {
+      if (scanResult.rawFindings) {
         setAiLoading(true);
         try {
-          const modelLabel = AVAILABLE_MODELS.find((m) => m.id === aiModel)?.label ?? aiModel;
+          const modelLabel = getModelLabel(aiModel);
           setScanStatus(`Generating AI summary with ${modelLabel}...`);
           const aiRes = await fetch("/api/ai-summary", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              rawViolations: scanResult.rawViolations,
+              rawFindings: scanResult.rawFindings,
               model: aiModel,
-              ...(scanResult.platform && { platform: scanResult.platform }),
+              ...(scanPayload.platform && { platform: scanPayload.platform }),
             }),
           });
 
@@ -465,6 +267,13 @@ export default function DemoPage() {
                   ))}
                 </select>
               </div>
+              <p className="mt-1.5 text-xs text-theme-muted">
+                Demo mode uses the strict axe-only profile.{" "}
+                <Link href="/" className="text-accent underline underline-offset-2">
+                  Sign in on the main scanner
+                </Link>{" "}
+                to unlock comprehensive multi-engine scans and saved audits.
+              </p>
               <p id="ai-model-hint" className="mt-1.5 text-xs text-theme-muted">
                 Compare insight quality across models. Prices shown per 1M tokens (in/out). Requires <code className="bg-theme-tertiary px-1 py-0.5 rounded font-mono">OPENAI_API_KEY</code>.
               </p>
@@ -562,6 +371,12 @@ export default function DemoPage() {
                       }
                     </span>
                   )}
+                  <span className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full bg-theme-secondary border border-theme text-theme-secondary">
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 7h16M4 12h16M4 17h16" />
+                    </svg>
+                    {result.engineProfile === "comprehensive" ? "Comprehensive" : "Strict"} profile
+                  </span>
                 </div>
               </div>
 
@@ -619,6 +434,24 @@ export default function DemoPage() {
               <ViolationCard violations={result.violations} />
             </section>
 
+            {result.reviewViolations.total > 0 && (
+              <section>
+                <h3 className="text-xl font-display font-bold text-theme-primary mb-2">
+                  Needs Review
+                </h3>
+                <p className="text-sm text-theme-secondary mb-4">
+                  These lower-confidence findings do not affect the grade, but they&apos;re worth checking by hand.
+                </p>
+                <ViolationCard violations={result.reviewViolations} />
+              </section>
+            )}
+
+            <EngineSummaryAccordion
+              engineProfile={result.engineProfile}
+              engineSummary={result.engineSummary}
+              headingLevel="h3"
+            />
+
             {/* AI Summary */}
             <section className="garden-bed p-6 lg:p-8 bg-[var(--accent-bg)]" style={{ borderColor: 'var(--accent-border)' }}>
               <div className="flex items-start gap-4">
@@ -643,7 +476,7 @@ export default function DemoPage() {
                     <h3 className="text-lg font-display font-semibold text-theme-primary">AI Summary</h3>
                     {result.aiModel && (
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-[var(--accent-bg)] border border-[var(--accent-border)] text-accent">
-                        {AVAILABLE_MODELS.find((m) => m.id === result.aiModel)?.label ?? result.aiModel}
+                        {getModelLabel(result.aiModel)}
                       </span>
                     )}
                   </div>
@@ -656,7 +489,7 @@ export default function DemoPage() {
                         <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
                         </svg>
-                        Powered by OpenAI {AVAILABLE_MODELS.find((m) => m.id === result.aiModel)?.label ?? result.aiModel ?? "GPT-4.1 Mini"}
+                        Powered by OpenAI {getModelLabel(result.aiModel)}
                       </p>
                     </>
                   ) : aiLoading ? (
@@ -732,9 +565,24 @@ export default function DemoPage() {
               </section>
             ) : null}
 
-            {/* Detailed Violations */}
-            {result.rawViolations && result.violations.total > 0 && (
-              <DetailedViolationsAccordion rawViolations={result.rawViolations} />
+            {/* Detailed Findings */}
+            {result.rawFindings && result.violations.total > 0 && (
+              <FindingDetailsAccordion
+                idPrefix="demo-confirmed"
+                rawFindings={result.rawFindings}
+                disposition="confirmed"
+                title="Confirmed Findings"
+              />
+            )}
+
+            {result.rawFindings && result.reviewViolations.total > 0 && (
+              <FindingDetailsAccordion
+                idPrefix="demo-review"
+                rawFindings={result.rawFindings}
+                disposition="needs-review"
+                title="Needs Review Details"
+                description="These items should be manually reviewed before treating them as confirmed defects."
+              />
             )}
 
             {/* Actions */}

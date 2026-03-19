@@ -40,11 +40,15 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const { rawViolations, model, platform } = await request.json();
+    const { rawFindings, rawViolations, model, platform, viewport } =
+      await request.json();
 
-    if (!rawViolations || typeof rawViolations !== "string") {
+    if (
+      (!rawFindings || typeof rawFindings !== "string") &&
+      (!rawViolations || typeof rawViolations !== "string")
+    ) {
       return NextResponse.json(
-        { error: "rawViolations (string) is required" },
+        { error: "rawFindings (string) is required" },
         { status: 400 },
       );
     }
@@ -55,9 +59,11 @@ export async function POST(request: NextRequest) {
       model && validModelIds.includes(model) ? model : DEFAULT_AI_MODEL;
 
     const result = await generateAISummary(
-      rawViolations,
+      typeof rawFindings === "string" ? rawFindings : "[]",
       selectedModel,
       typeof platform === "string" ? platform : undefined,
+      viewport === "mobile" ? "mobile" : "desktop",
+      typeof rawViolations === "string" ? rawViolations : undefined,
     );
 
     return NextResponse.json(result);

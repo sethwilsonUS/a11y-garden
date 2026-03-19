@@ -348,7 +348,6 @@ const ESCALATION_CHAIN: AttemptConfig[] = [
 
 function attemptNav(
   nav: BqlNavigateResult,
-  targetUrl: string,
 ): { ok: true; waf: null } | { ok: false; waf: { detected: boolean; type: string | null } } {
   const waf = detectWaf(nav.html, nav.pageTitle, nav.httpStatus ?? 200);
   if (waf.detected) return { ok: false, waf };
@@ -413,7 +412,7 @@ async function testUrl(targetUrl: string): Promise<SpikeResult> {
         console.log(`  ${stepLabel} CF found=${result.cfFound}, solved=${result.cfSolved} (${result.verifyTimeMs}ms)`);
       }
 
-      const check = attemptNav(nav, targetUrl);
+      const check = attemptNav(nav);
       if (!check.ok) {
         result.wafDetected = check.waf.detected;
         result.wafType = check.waf.type;

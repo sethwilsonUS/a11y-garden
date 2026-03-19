@@ -4,8 +4,8 @@
  * Reads the SCAN_STRATEGY env var to determine which strategy to use.
  *
  * When SCAN_STRATEGY is not set, auto-detects based on env vars:
- *   - BROWSERLESS_URL set (no token) → local (Docker Browserless)
- *   - BROWSERLESS_TOKEN set          → fallback (BaaS → BQL escalation)
+ *   - On Vercel + BROWSERLESS_TOKEN  → fallback (BaaS → BQL escalation)
+ *   - BROWSERLESS_URL set            → local (Docker Browserless)
  *   - Neither set                    → local (launches local Playwright)
  *
  * Explicit values:

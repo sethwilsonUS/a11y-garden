@@ -23,6 +23,7 @@ interface AgentPlanButtonProps {
   agentPlanFileId: string | undefined;
   domain: string;
   isOwner: boolean;
+  isSignedIn: boolean;
 }
 
 const GRACE_PERIOD_MS = 60_000;
@@ -36,6 +37,7 @@ function AgentPlanButtonInner({
   agentPlanFileId,
   domain,
   isOwner,
+  isSignedIn,
 }: AgentPlanButtonProps) {
   const [isGenerating, setIsGenerating] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -69,6 +71,7 @@ function AgentPlanButtonInner({
 
   // Visibility gate — must come after all hooks
   if (
+    !isSignedIn ||
     !isOwner ||
     !platform ||
     CMS_PLATFORMS.has(platform) ||

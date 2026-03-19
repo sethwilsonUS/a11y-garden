@@ -3,10 +3,9 @@
 interface WafBadgeProps {
   wafDetected?: boolean;
   wafBypassed?: boolean;
-  scanStrategy?: string;
 }
 
-export function WafBadge({ wafDetected, wafBypassed, scanStrategy }: WafBadgeProps) {
+export function WafBadge({ wafDetected, wafBypassed }: WafBadgeProps) {
   if (wafDetected == null) return null;
 
   if (!wafDetected) {

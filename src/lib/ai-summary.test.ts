@@ -107,7 +107,7 @@ describe("generateAISummary", () => {
       ]);
     });
 
-    it("calls OpenAI with gpt-4.1-mini model by default", async () => {
+    it("calls OpenAI with gpt-5.4-mini model by default", async () => {
       vi.stubEnv("OPENAI_API_KEY", "sk-test-key");
 
       mockCreate.mockResolvedValue({
@@ -124,11 +124,11 @@ describe("generateAISummary", () => {
 
       expect(mockCreate).toHaveBeenCalledWith(
         expect.objectContaining({
-          model: "gpt-4.1-mini",
+          model: "gpt-5.4-mini",
           response_format: { type: "json_object" },
         }),
       );
-      expect(result.model).toBe("gpt-4.1-mini");
+      expect(result.model).toBe("gpt-5.4-mini");
     });
 
     it("uses a custom model when provided", async () => {
@@ -291,7 +291,7 @@ describe("generateAISummary", () => {
         ],
       });
 
-      await generateAISummary(sampleViolations, "gpt-4.1-mini", "squarespace");
+      await generateAISummary(sampleViolations, "gpt-5.4-mini", "squarespace");
 
       const callArgs = mockCreate.mock.calls[0][0];
       const userMessage = callArgs.messages[1].content as string;
@@ -312,7 +312,7 @@ describe("generateAISummary", () => {
         ],
       });
 
-      await generateAISummary(sampleViolations, "gpt-4.1-mini", undefined);
+      await generateAISummary(sampleViolations, "gpt-5.4-mini", undefined);
 
       const callArgs = mockCreate.mock.calls[0][0];
       const userMessage = callArgs.messages[1].content as string;
@@ -338,7 +338,7 @@ describe("generateAISummary", () => {
 
       const result = await generateAISummary(
         sampleViolations,
-        "gpt-4.1-mini",
+        "gpt-5.4-mini",
         "wordpress",
       );
 
@@ -387,7 +387,7 @@ describe("generateAISummary", () => {
 
       const result = await generateAISummary(
         sampleViolations,
-        "gpt-4.1-mini",
+        "gpt-5.4-mini",
         "shopify",
       );
 
@@ -413,7 +413,7 @@ describe("generateAISummary", () => {
 
       const result = await generateAISummary(
         sampleViolations,
-        "gpt-4.1-mini",
+        "gpt-5.4-mini",
         "wix",
       );
 
@@ -437,7 +437,7 @@ describe("generateAISummary", () => {
         ],
       });
 
-      await generateAISummary(sampleViolations, "gpt-4.1-mini", "react");
+      await generateAISummary(sampleViolations, "gpt-5.4-mini", "react");
 
       const callArgs = mockCreate.mock.calls[0][0];
       const userMessage = callArgs.messages[1].content as string;
@@ -461,7 +461,7 @@ describe("generateAISummary", () => {
         ],
       });
 
-      await generateAISummary(sampleViolations, "gpt-4.1-mini");
+      await generateAISummary(sampleViolations, "gpt-5.4-mini");
 
       const callArgs = mockCreate.mock.calls[0][0];
       const userMessage = callArgs.messages[1].content as string;
@@ -485,7 +485,7 @@ describe("generateAISummary", () => {
         ],
       });
 
-      await generateAISummary(sampleViolations, "gpt-4.1-mini", undefined, "mobile");
+      await generateAISummary(sampleViolations, "gpt-5.4-mini", undefined, "mobile");
 
       const callArgs = mockCreate.mock.calls[0][0];
       const userMessage = callArgs.messages[1].content as string;
@@ -510,7 +510,7 @@ describe("generateAISummary", () => {
         ],
       });
 
-      await generateAISummary(sampleViolations, "gpt-4.1-mini", "nextjs");
+      await generateAISummary(sampleViolations, "gpt-5.4-mini", "nextjs");
 
       const callArgs = mockCreate.mock.calls[0][0];
       const userMessage = callArgs.messages[1].content as string;

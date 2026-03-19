@@ -5,8 +5,9 @@
  * 2. If WAF detected and user is authenticated, fall back to BQL
  * 3. If WAF detected and user is anonymous, return requiresAuth error
  *
- * The BQL path uses single viewport only — JSDOM has no renderer so
- * desktop/mobile is meaningless. The route layer clones the result for both.
+ * The BQL path runs the desktop fetch first, then the strategy may reuse those
+ * findings for mobile or attempt a second mobile-specific fetch when adaptive
+ * serving signals are present.
  */
 
 import { ScanBlockedError } from "@/lib/scanner";

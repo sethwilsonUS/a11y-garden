@@ -10,6 +10,7 @@ function makeGroupedViolation(
   overrides: Partial<GroupedViolation> & { ruleId: string },
 ): GroupedViolation {
   return {
+    title: overrides.ruleId.replace(/-/g, " "),
     impact: "moderate",
     description: `Description for ${overrides.ruleId}`,
     helpUrl: `https://dequeuniversity.com/rules/${overrides.ruleId}`,
@@ -17,6 +18,8 @@ function makeGroupedViolation(
     selectors: [".some-element"],
     htmlSnippets: ["<div class='some-element'></div>"],
     nodeCount: 1,
+    engines: ["axe"],
+    viewports: ["desktop"],
     ...overrides,
   };
 }
@@ -29,6 +32,8 @@ const BASE_INPUT = {
   platform: "nextjs",
   url: "https://example.com",
   auditDate: "2026-03-03",
+  totalConfirmedFindings: 2,
+  totalGroupedIssues: 2,
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -95,6 +100,43 @@ describe("buildAgentPlanPrompt", () => {
       expect(result.userPrompt).toContain("button-name");
     });
 
+    it("uses the human-friendly title and rule id together", () => {
+      const result = buildAgentPlanPrompt({
+        ...BASE_INPUT,
+        violations: [
+          makeGroupedViolation({
+            ruleId: "image-alt",
+            title: "Images must have alternate text",
+            impact: "critical",
+          }),
+        ],
+      });
+
+      expect(result.userPrompt).toContain("**Images must have alternate text** (`image-alt`)");
+    });
+
+    it("includes engine and viewport context when it adds signal", () => {
+      const result = buildAgentPlanPrompt({
+        ...BASE_INPUT,
+        violations: [
+          makeGroupedViolation({
+            ruleId: "color-contrast",
+            engines: ["axe", "ace"],
+            viewports: ["desktop", "mobile"],
+          }),
+          makeGroupedViolation({
+            ruleId: "button-name",
+            engines: ["axe"],
+            viewports: ["mobile"],
+          }),
+        ],
+      });
+
+      expect(result.userPrompt).toContain("Confirmed by: axe-core, IBM ACE");
+      expect(result.userPrompt).toContain("Viewports: desktop and mobile");
+      expect(result.userPrompt).toContain("Viewports: mobile");
+    });
+
     it("userPrompt includes the target URL and audit date", () => {
       const result = buildAgentPlanPrompt({
         ...BASE_INPUT,
@@ -148,6 +190,19 @@ describe("buildAgentPlanPrompt", () => {
       const totalLength = result.systemPrompt.length + result.userPrompt.length;
 
       expect(totalLength).toBeLessThan(12000);
+    });
+
+    it("includes coverage notes when the prompt only includes a subset of grouped issues", () => {
+      const result = buildAgentPlanPrompt({
+        ...BASE_INPUT,
+        totalConfirmedFindings: 18,
+        totalGroupedIssues: 40,
+        coverageNotes: ["Desktop engine coverage was partial: HTML_CodeSniffer skipped."],
+      });
+
+      expect(result.userPrompt).toContain("Grouped issues included in this prompt: 2 of 40 grouped issues");
+      expect(result.userPrompt).toContain("## Coverage Notes");
+      expect(result.userPrompt).toContain("Desktop engine coverage was partial");
     });
   });
 

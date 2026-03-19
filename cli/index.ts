@@ -46,9 +46,13 @@ import { createScanStrategy, type StrategyScanResult } from "@/lib/scan/strategi
 import { PLATFORM_LABELS } from "@/lib/platforms";
 import { calculateGrade, calculateCombinedGrade } from "@/lib/grading";
 import {
+  parseSerializedFindings,
+  type EngineProfile,
+  type EngineSummary,
+} from "@/lib/findings";
+import {
   generateMarkdownReport,
   type ReportData,
-  type AxeViolation,
 } from "@/lib/report";
 import { generateAISummary, DEFAULT_AI_MODEL } from "@/lib/ai-summary";
 
@@ -83,6 +87,23 @@ function severityColor(
   return map[severity] || chalk.white;
 }
 
+function formatProfileLabel(profile?: EngineProfile): string | undefined {
+  if (!profile) return undefined;
+  return profile === "comprehensive" ? "Comprehensive" : "Strict";
+}
+
+function parseEngineSummary(
+  value?: EngineSummary | string,
+): EngineSummary | undefined {
+  if (!value) return undefined;
+  if (typeof value !== "string") return value;
+  try {
+    return JSON.parse(value) as EngineSummary;
+  } catch {
+    return undefined;
+  }
+}
+
 function formatTerminalReport(data: ReportData): string {
   const lines: string[] = [];
 
@@ -114,6 +135,11 @@ function formatTerminalReport(data: ReportData): string {
   if (data.platform) {
     const label = PLATFORM_LABELS[data.platform] ?? data.platform;
     lines.push(`  ${chalk.dim("Platform")} ${label}`);
+  }
+
+  const profileLabel = formatProfileLabel(data.engineProfile);
+  if (profileLabel) {
+    lines.push(`  ${chalk.dim("Profile")}  ${profileLabel}`);
   }
 
   if (data.scanMode === "safe") {
@@ -165,6 +191,26 @@ function formatTerminalReport(data: ReportData): string {
 
   lines.push(chalk.dim(`    ${"─".repeat(16)}`));
   lines.push(chalk.bold(`    ${pad("Total")} ${data.violations.total}`));
+
+  if (data.reviewViolations && data.reviewViolations.total > 0) {
+    lines.push(chalk.dim(`    Review     ${data.reviewViolations.total}`));
+    lines.push(chalk.dim("    Grades are based on confirmed findings only."));
+  }
+
+  const engineSummary = parseEngineSummary(data.engineSummary);
+  if (engineSummary?.engines.length) {
+    lines.push("");
+    lines.push(divider);
+    lines.push("");
+    lines.push(chalk.bold("  Scan Engines"));
+    lines.push("");
+    for (const engine of engineSummary.engines) {
+      const note = engine.note ? ` — ${engine.note}` : "";
+      lines.push(
+        `  ${engine.engine}: ${engine.status} (${engine.confirmedCount} confirmed / ${engine.reviewCount} review, ${engine.durationMs} ms)${note}`,
+      );
+    }
+  }
 
   // ---- AI Summary ---------------------------------------------------------
   if (data.aiSummary) {
@@ -222,47 +268,50 @@ function formatTerminalReport(data: ReportData): string {
     if (line.trim().length > 0) lines.push(line);
   }
 
-  // ---- Violations by rule -------------------------------------------------
-  if (data.rawViolations) {
-    try {
-      const violations: AxeViolation[] = JSON.parse(data.rawViolations);
-      if (violations.length > 0) {
-        lines.push("");
-        lines.push(divider);
-        lines.push("");
-        lines.push(chalk.bold("  Violations by Rule"));
+  const findings = parseSerializedFindings(data.rawFindings, data.rawViolations);
+  const renderFindingGroup = (
+    heading: string,
+    disposition: "confirmed" | "needs-review",
+  ) => {
+    const scoped = findings.filter((finding) => finding.disposition === disposition);
+    if (scoped.length === 0) return;
 
-        const severityOrder = ["critical", "serious", "moderate", "minor"];
-        const grouped = severityOrder.reduce(
-          (acc, severity) => {
-            acc[severity] = violations.filter((v) => v.impact === severity);
-            return acc;
-          },
-          {} as Record<string, AxeViolation[]>,
-        );
+    lines.push("");
+    lines.push(divider);
+    lines.push("");
+    lines.push(chalk.bold(`  ${heading}`));
 
-        for (const severity of severityOrder) {
-          const items = grouped[severity];
-          if (!items || items.length === 0) continue;
-
-          const label =
-            severity.charAt(0).toUpperCase() + severity.slice(1);
-          const color = severityColor(severity, items.length);
-
-          lines.push("");
-          lines.push(color(`  ${label} (${items.length})`));
-          lines.push("");
-
-          for (const v of items) {
-            const count = `${v.nodes.length} element${v.nodes.length === 1 ? "" : "s"}`;
-            lines.push(`    ${chalk.dim("▸")} ${v.help} ${chalk.dim(`(${v.id})`)} — ${chalk.dim(count)}`);
-          }
-        }
-      }
-    } catch {
-      // Ignore parse errors
+    if (disposition === "needs-review") {
+      lines.push("");
+      lines.push(chalk.dim("  Lower-confidence items to manually review before treating as confirmed."));
     }
-  }
+
+    const severityOrder = ["critical", "serious", "moderate", "minor"] as const;
+    for (const severity of severityOrder) {
+      const items = scoped.filter((finding) => finding.impact === severity);
+      if (items.length === 0) continue;
+
+      const label = severity.charAt(0).toUpperCase() + severity.slice(1);
+      const color = severityColor(severity, items.length);
+
+      lines.push("");
+      lines.push(color(`  ${label} (${items.length})`));
+      lines.push("");
+
+      for (const finding of items) {
+        const count = `${finding.nodes.length} element${finding.nodes.length === 1 ? "" : "s"}`;
+        const engines = finding.engines.length > 0
+          ? chalk.dim(` · ${finding.engines.join(", ")}`)
+          : "";
+        lines.push(
+          `    ${chalk.dim("▸")} ${finding.help} ${chalk.dim(`(${finding.id})`)} — ${chalk.dim(count)}${engines}`,
+        );
+      }
+    }
+  };
+
+  renderFindingGroup("Confirmed Findings", "confirmed");
+  renderFindingGroup("Needs Review", "needs-review");
 
   // ---- Footer -------------------------------------------------------------
   lines.push("");
@@ -281,7 +330,11 @@ function formatTerminalReport(data: ReportData): string {
 function strategyResultToScanResult(res: StrategyScanResult): ScanResult {
   return {
     violations: res.violations,
-    rawViolations: res.rawViolations,
+    reviewViolations: res.reviewViolations,
+    rawFindings: res.rawFindings,
+    findingsVersion: res.findingsVersion,
+    engineProfile: res.engineProfile,
+    engineSummary: res.engineSummary,
     pageTitle: res.pageTitle ?? "",
     safeMode: res.scanMode.mode !== "full",
     truncated: res.truncated,
@@ -300,7 +353,11 @@ function strategyResultsToDualResult(
   return {
     desktop: {
       violations: desktop.violations,
-      rawViolations: desktop.rawViolations,
+      reviewViolations: desktop.reviewViolations,
+      rawFindings: desktop.rawFindings,
+      findingsVersion: desktop.findingsVersion,
+      engineProfile: desktop.engineProfile,
+      engineSummary: desktop.engineSummary,
       safeMode: desktop.scanMode.mode !== "full",
       truncated: desktop.truncated,
       screenshot: desktop.screenshot,
@@ -310,7 +367,11 @@ function strategyResultsToDualResult(
     },
     mobile: {
       violations: mobile.violations,
-      rawViolations: mobile.rawViolations,
+      reviewViolations: mobile.reviewViolations,
+      rawFindings: mobile.rawFindings,
+      findingsVersion: mobile.findingsVersion,
+      engineProfile: mobile.engineProfile,
+      engineSummary: mobile.engineSummary,
       safeMode: mobile.scanMode.mode !== "full",
       truncated: mobile.truncated,
       screenshot: mobile.screenshot,
@@ -339,11 +400,20 @@ program
   .option("--json", "Output raw JSON")
   .option("--screenshot [path]", "Save a screenshot of the scanned page (default: screenshot.jpg)")
   .option("--local", "Force local Playwright even if BROWSERLESS_URL is set")
+  .option("--profile <profile>", "Scan profile: strict or comprehensive", "strict")
   .option("--desktop-only", "Skip mobile viewport scan (desktop only)")
   .action(
     async (
       rawUrl: string,
-      options: { ai: boolean; markdown: boolean; json: boolean; screenshot?: boolean | string; local?: boolean; desktopOnly?: boolean },
+      options: {
+        ai: boolean;
+        markdown: boolean;
+        json: boolean;
+        screenshot?: boolean | string;
+        local?: boolean;
+        desktopOnly?: boolean;
+        profile?: string;
+      },
     ) => {
       // ---- Normalize URL ----------------------------------------------------
       let url = rawUrl.trim();
@@ -369,6 +439,8 @@ program
       // ---- Scan -------------------------------------------------------------
       const wantsScreenshot = options.screenshot !== undefined && options.screenshot !== false;
       const desktopOnly = !!options.desktopOnly;
+      const engineProfile: EngineProfile =
+        options.profile === "comprehensive" ? "comprehensive" : "strict";
 
       let scanResult: ScanResult | undefined;
       let dualResult: DualScanResult | undefined;
@@ -383,9 +455,15 @@ program
 
         try {
           if (desktopOnly) {
-            scanResult = await scanUrl(url, { captureScreenshot: wantsScreenshot });
+            scanResult = await scanUrl(url, {
+              captureScreenshot: wantsScreenshot,
+              engineProfile,
+            });
           } else {
-            dualResult = await scanUrlDual(url, { captureScreenshot: wantsScreenshot });
+            dualResult = await scanUrlDual(url, {
+              captureScreenshot: wantsScreenshot,
+              engineProfile,
+            });
           }
           spinner.succeed(
             desktopOnly
@@ -421,6 +499,7 @@ program
         try {
           const strategyOpts = {
             captureScreenshot: wantsScreenshot,
+            engineProfile,
             timeBudgetMs: 120_000,
             isAuthenticated: false,
           };
@@ -511,7 +590,7 @@ program
       let platformTip: string | undefined;
 
       const detectedPlatform = desktopOnly ? scanResult?.platform : dualResult?.platform;
-      const desktopRawViolations = desktopOnly ? scanResult!.rawViolations : dualResult!.desktop.rawViolations;
+      const desktopRawFindings = desktopOnly ? scanResult!.rawFindings : dualResult!.desktop.rawFindings;
 
       const hasOpenAIKey = !!process.env.OPENAI_API_KEY;
       const wantsAI = options.ai && hasOpenAIKey;
@@ -522,7 +601,7 @@ program
         );
       }
 
-      if (wantsAI && desktopViolations.total > 0) {
+      if (wantsAI) {
         const aiSpinner = ora({
           text: "Generating AI summary...",
           stream: process.stderr,
@@ -530,7 +609,7 @@ program
 
         try {
           const aiResult = await generateAISummary(
-            desktopRawViolations,
+            desktopRawFindings,
             DEFAULT_AI_MODEL,
             detectedPlatform,
           );
@@ -543,10 +622,6 @@ program
             error instanceof Error ? error.message : "unknown error";
           aiSpinner.warn(`AI summary skipped: ${msg}`);
         }
-      } else if (wantsAI && desktopViolations.total === 0) {
-        aiSummary =
-          "Excellent! This page passed all automated accessibility checks. While automated testing can't catch every accessibility issue, this is a great foundation.";
-        topIssues = [];
       }
 
       // ---- Build report data ------------------------------------------------
@@ -563,8 +638,15 @@ program
         score: primaryScore,
         scannedAt: Date.now(),
         violations: desktopViolations,
+        reviewViolations: desktopOnly
+          ? scanResult!.reviewViolations
+          : dualResult!.desktop.reviewViolations,
         scanMode: desktopScanMode as ReportData["scanMode"],
-        rawViolations: desktopRawViolations,
+        engineProfile,
+        engineSummary: desktopOnly
+          ? scanResult!.engineSummary
+          : dualResult!.desktop.engineSummary,
+        rawFindings: desktopRawFindings,
         ...(aiSummary !== undefined && { aiSummary }),
         ...(topIssues !== undefined && { topIssues }),
         ...(detectedPlatform && { platform: detectedPlatform }),
@@ -572,6 +654,7 @@ program
         // Mobile fields for report generator
         ...(!desktopOnly && dualResult ? {
           mobileViolations: dualResult.mobile.violations,
+          mobileReviewViolations: dualResult.mobile.reviewViolations,
           mobileLetterGrade: mobileGradeResult!.grade,
           mobileScore: mobileGradeResult!.score,
           mobileScanMode: (() => {
@@ -579,7 +662,8 @@ program
             if (info) return info.mode === "safe-rules" ? "safe" as const : info.mode;
             return dualResult.mobile.safeMode ? "safe" as const : "full" as const;
           })(),
-          mobileRawViolations: dualResult.mobile.rawViolations,
+          mobileEngineSummary: dualResult.mobile.engineSummary,
+          mobileRawFindings: dualResult.mobile.rawFindings,
           ...(dualResult.mobile.truncated && { mobileTruncated: true }),
         } : {}),
       };
@@ -591,6 +675,7 @@ program
           pageTitle: desktopOnly ? scanResult!.pageTitle : dualResult!.pageTitle,
           letterGrade: primaryGrade,
           score: primaryScore,
+          engineProfile,
           ...(detectedPlatform && { platform: detectedPlatform }),
           ...(aiSummary !== undefined && { aiSummary }),
           ...(topIssues !== undefined && { topIssues }),
@@ -598,9 +683,15 @@ program
             letterGrade: desktopGradeResult.grade,
             score: desktopGradeResult.score,
             violations: desktopViolations,
+            reviewViolations: desktopOnly
+              ? scanResult!.reviewViolations
+              : dualResult!.desktop.reviewViolations,
             safeMode: desktopSafeMode,
+            engineSummary: desktopOnly
+              ? scanResult!.engineSummary
+              : dualResult!.desktop.engineSummary,
             truncated: desktopOnly ? scanResult!.truncated : dualResult!.desktop.truncated,
-            rawViolations: JSON.parse(desktopRawViolations),
+            rawFindings: JSON.parse(desktopRawFindings),
           },
         };
         if (!desktopOnly && dualResult && mobileGradeResult) {
@@ -608,9 +699,11 @@ program
             letterGrade: mobileGradeResult.grade,
             score: mobileGradeResult.score,
             violations: dualResult.mobile.violations,
+            reviewViolations: dualResult.mobile.reviewViolations,
             safeMode: dualResult.mobile.safeMode,
+            engineSummary: dualResult.mobile.engineSummary,
             truncated: dualResult.mobile.truncated,
-            rawViolations: JSON.parse(dualResult.mobile.rawViolations),
+            rawFindings: JSON.parse(dualResult.mobile.rawFindings),
           };
         }
         console.log(JSON.stringify(output, null, 2));
@@ -633,8 +726,11 @@ program
             score: mobileGradeResult.score,
             scannedAt: Date.now(),
             violations: dualResult.mobile.violations,
+            reviewViolations: dualResult.mobile.reviewViolations,
             scanMode: mobileMode as ReportData["scanMode"],
-            rawViolations: dualResult.mobile.rawViolations,
+            engineProfile,
+            engineSummary: dualResult.mobile.engineSummary,
+            rawFindings: dualResult.mobile.rawFindings,
           };
           console.log(chalk.bold("\n  ── Mobile Viewport (390×844) ──\n"));
           console.log(formatTerminalReport(mobileReportData));

@@ -4,8 +4,13 @@ import { v } from "convex/values";
 import { action } from "./_generated/server";
 import { api } from "./_generated/api";
 import OpenAI from "openai";
-import { groupViolations } from "./lib/groupViolations";
+import { DEFAULT_MAX_GROUPS, groupViolations } from "./lib/groupViolations";
 import { buildAgentPlanPrompt } from "./lib/buildAgentPlanPrompt";
+import {
+  parseSerializedFindings,
+  type EngineProfile,
+  type EngineSummary,
+} from "../src/lib/findings";
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Constants
@@ -15,6 +20,7 @@ export const CMS_PLATFORMS = new Set([
   "wordpress", "squarespace", "shopify", "wix", "webflow",
   "drupal", "joomla", "ghost", "hubspot", "weebly",
 ]);
+const AGENT_PLAN_MODEL = "gpt-5.4-mini";
 
 function getOpenAIClient() {
   const apiKey = process.env.OPENAI_API_KEY;
@@ -36,11 +42,80 @@ export interface AgentPlanDeps {
     model: string;
     messages: Array<{ role: string; content: string }>;
     temperature: number;
-    max_tokens: number;
+    max_completion_tokens: number;
   }) => Promise<{ choices: Array<{ message: { content: string | null } }> }>;
 }
 
 type AgentPlanResult = { success: true } | { success: false; error: string };
+
+const ENGINE_LABELS: Record<string, string> = {
+  axe: "axe-core",
+  ace: "IBM ACE",
+  htmlcs: "HTML_CodeSniffer",
+};
+
+function parseEngineSummary(
+  value: unknown,
+): EngineSummary | undefined {
+  if (!value) return undefined;
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value) as EngineSummary;
+    } catch {
+      return undefined;
+    }
+  }
+  if (typeof value === "object" && value !== null) {
+    return value as EngineSummary;
+  }
+  return undefined;
+}
+
+function summarizeViewportCoverage(
+  viewport: "desktop" | "mobile",
+  summary: EngineSummary | undefined,
+): string | null {
+  if (!summary) return null;
+  const nonCompleted = summary.engines.filter((engine) => engine.status !== "completed");
+  if (nonCompleted.length === 0) return null;
+
+  const label = viewport === "desktop" ? "Desktop" : "Mobile";
+  const details = nonCompleted.map((engine) => {
+    const engineLabel = ENGINE_LABELS[engine.engine] ?? engine.engine;
+    return `${engineLabel} ${engine.status}${engine.note ? ` (${engine.note})` : ""}`;
+  });
+
+  return `${label} engine coverage was partial: ${details.join("; ")}.`;
+}
+
+function buildCoverageNotes(
+  audit: Record<string, unknown>,
+): string[] {
+  const notes: string[] = [];
+  const desktopCoverage = summarizeViewportCoverage(
+    "desktop",
+    parseEngineSummary(audit.engineSummary),
+  );
+  const mobileCoverage = summarizeViewportCoverage(
+    "mobile",
+    parseEngineSummary(audit.mobileEngineSummary),
+  );
+
+  if (desktopCoverage) notes.push(desktopCoverage);
+  if (mobileCoverage) notes.push(mobileCoverage);
+  if (audit.truncated) {
+    notes.push(
+      "Desktop stored examples were trimmed for size, so selectors and HTML snippets are representative rather than exhaustive.",
+    );
+  }
+  if (audit.mobileTruncated) {
+    notes.push(
+      "Mobile stored examples were trimmed for size, so selectors and HTML snippets are representative rather than exhaustive.",
+    );
+  }
+
+  return notes;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Core logic (exported for testing)
@@ -67,20 +142,43 @@ export async function generateAgentPlanCore(
       };
     }
 
-    const rawViolations = audit.rawViolations as string | undefined;
-    if (!rawViolations) {
+    const desktopFindings = parseSerializedFindings(
+      audit.rawFindings as string | undefined,
+      audit.rawViolations as string | undefined,
+    );
+    const mobileFindings = parseSerializedFindings(
+      audit.mobileRawFindings as string | undefined,
+      audit.mobileRawViolations as string | undefined,
+    );
+
+    if (desktopFindings.length === 0 && mobileFindings.length === 0) {
       return { success: false, error: "No violation data available." };
     }
 
-    const desktopViolations = JSON.parse(rawViolations);
-    const mobileRaw = audit.mobileRawViolations as string | undefined;
-    const mobileViolations = mobileRaw ? JSON.parse(mobileRaw) : undefined;
+    const confirmedDesktopFindings = desktopFindings.filter(
+      (finding) => finding.disposition === "confirmed",
+    );
+    const confirmedMobileFindings = mobileFindings.filter(
+      (finding) => finding.disposition === "confirmed",
+    );
 
-    const grouped = groupViolations(desktopViolations, mobileViolations);
+    const allGrouped = groupViolations(
+      confirmedDesktopFindings,
+      confirmedMobileFindings.length > 0 ? confirmedMobileFindings : undefined,
+      Number.MAX_SAFE_INTEGER,
+    );
+    const grouped = allGrouped.slice(0, DEFAULT_MAX_GROUPS);
 
     if (grouped.length === 0) {
-      return { success: false, error: "No violations to generate a plan for." };
+      return {
+        success: false,
+        error:
+          "Only manual-review findings are available. No confirmed violations to generate a plan for.",
+      };
     }
+
+    const totalConfirmedFindings =
+      confirmedDesktopFindings.length + confirmedMobileFindings.length;
 
     const { systemPrompt, userPrompt } = buildAgentPlanPrompt({
       violations: grouped,
@@ -88,16 +186,20 @@ export async function generateAgentPlanCore(
       url: audit.url as string,
       auditDate: new Date(audit.scannedAt as number).toISOString().split("T")[0],
       pageTitle: audit.pageTitle as string | undefined,
+      scanProfile: audit.engineProfile as EngineProfile | undefined,
+      totalConfirmedFindings,
+      totalGroupedIssues: allGrouped.length,
+      coverageNotes: buildCoverageNotes(audit),
     });
 
     const completion = await deps.openaiCreate({
-      model: "gpt-4.1-mini",
+      model: AGENT_PLAN_MODEL,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
       temperature: 0.3,
-      max_tokens: 4096,
+      max_completion_tokens: 4096,
     });
 
     const agentPlanMd = completion.choices[0]?.message?.content;

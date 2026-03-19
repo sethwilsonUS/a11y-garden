@@ -38,12 +38,17 @@ export class PlaywrightBaaSStrategy implements ScanStrategy {
     const result = await scanUrl(url, {
       browserWSEndpoint: this.browserWSEndpoint,
       captureScreenshot: opts.captureScreenshot,
+      engineProfile: opts.engineProfile,
       viewport: opts.viewport,
     });
 
     return {
       violations: result.violations,
-      rawViolations: result.rawViolations,
+      reviewViolations: result.reviewViolations,
+      rawFindings: result.rawFindings,
+      findingsVersion: result.findingsVersion,
+      engineProfile: result.engineProfile,
+      engineSummary: result.engineSummary,
       truncated: result.truncated,
       scanMode: result.scanModeInfo ?? {
         mode: "full",

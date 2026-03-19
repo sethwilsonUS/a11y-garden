@@ -6,135 +6,20 @@
  */
 
 import { chromium } from "playwright";
-import axe from "axe-core";
+import {
+  FINDINGS_VERSION,
+  type EngineProfile,
+  type EngineSummary,
+  type ViolationCounts,
+} from "./findings";
 import type { ScanModeInfo } from "./scan/strategies/types";
-import { SAFE_MODE_SKIPPED_CATEGORIES } from "./scan/rules/categories";
+import { runEnginesOnPage } from "./scan/engines/orchestrator";
 
-// ---------------------------------------------------------------------------
-// axe-core source loading
-// ---------------------------------------------------------------------------
-
-// axe-core exposes its full JS source via the `source` property,
-// designed for injection into browser pages (Selenium, Playwright, etc.).
-// Using a standard import ensures the bundler traces and includes it in
-// the serverless function bundle — no fs.readFileSync or path tricks needed.
-const AXE_CORE_SOURCE: string = axe.source;
-
-// CDN fallback URLs in case the bundled source is somehow empty
-const AXE_CDN_URLS = [
-  "https://cdnjs.cloudflare.com/ajax/libs/axe-core/4.11.1/axe.min.js",
-  "https://unpkg.com/axe-core@4.11.1/axe.min.js",
-];
-
-// Cached CDN source for reuse across requests within the same process
-let cachedCdnSource: string | null = null;
-
-/**
- * Returns the axe-core JS source string for browser injection.
- * Primary: bundled via `axe.source` (works on Vercel, Docker, local).
- * Fallback: server-side fetch from CDN (avoids CSP issues vs page.addScriptTag).
- */
-async function getAxeCoreSource(): Promise<string> {
-  if (AXE_CORE_SOURCE) {
-    return AXE_CORE_SOURCE;
-  }
-
-  if (cachedCdnSource) {
-    return cachedCdnSource;
-  }
-
-  for (const cdnUrl of AXE_CDN_URLS) {
-    try {
-      const response = await fetch(cdnUrl);
-      if (response.ok) {
-        cachedCdnSource = await response.text();
-        return cachedCdnSource;
-      }
-    } catch {
-      // Try next CDN URL
-    }
-  }
-
-  throw new Error(
-    "Failed to load axe-core: bundled source was empty and all CDN fallbacks failed",
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Raw-violations size cap
-// ---------------------------------------------------------------------------
-// Convex document fields have a 1 MB limit, and huge payloads also slow down
-// the client.  We cap the serialised violations at 350 KB and progressively
-// trim node arrays (keeping at least one node per rule) until it fits.
-
-const MAX_RAW_VIOLATIONS_CHARS = 358_000; // 350 KB in characters
-
-export interface AxeNodeRaw {
-  html?: string;
-  target?: string[];
-  failureSummary?: string;
-  [key: string]: unknown;
-}
-
-export interface AxeViolationRaw {
-  id: string;
-  impact?: string;
-  description?: string;
-  help?: string;
-  helpUrl?: string;
-  tags?: string[];
-  nodes: AxeNodeRaw[];
-  [key: string]: unknown;
-}
-
-/**
- * Shrink the violations payload to fit within MAX_RAW_VIOLATIONS_CHARS.
- *
- * Strategy: repeatedly halve the `nodes` array of whichever violation has the
- * most nodes, keeping at least one node per rule so every violation is still
- * represented.  Halving converges in O(log n) passes, so this is fast even
- * for very large result sets.
- */
-export function truncateViolations(violations: AxeViolationRaw[]): {
-  serialized: string;
-  truncated: boolean;
-} {
-  let serialized = JSON.stringify(violations);
-  if (serialized.length <= MAX_RAW_VIOLATIONS_CHARS) {
-    return { serialized, truncated: false };
-  }
-
-  // Deep-clone so we don't mutate the axe-core originals
-  const trimmed: AxeViolationRaw[] = JSON.parse(serialized);
-
-  // Safety cap — halving converges fast; 50 passes handles absurd cases
-  for (let pass = 0; pass < 50; pass++) {
-    serialized = JSON.stringify(trimmed);
-    if (serialized.length <= MAX_RAW_VIOLATIONS_CHARS) break;
-
-    // Find the violation with the largest node array (>1 so we keep at least 1)
-    let maxIdx = -1;
-    let maxNodes = 1;
-    for (let i = 0; i < trimmed.length; i++) {
-      const count = trimmed[i].nodes?.length ?? 0;
-      if (count > maxNodes) {
-        maxNodes = count;
-        maxIdx = i;
-      }
-    }
-
-    if (maxIdx === -1) break; // every violation already has ≤1 node
-
-    const keepCount = Math.max(
-      1,
-      Math.floor(trimmed[maxIdx].nodes.length / 2),
-    );
-    trimmed[maxIdx].nodes = trimmed[maxIdx].nodes.slice(0, keepCount);
-  }
-
-  serialized = JSON.stringify(trimmed);
-  return { serialized, truncated: true };
-}
+export {
+  truncateViolations,
+  type AxeViolationRaw,
+  type ViolationCounts,
+} from "./findings";
 
 // ---------------------------------------------------------------------------
 // Docker localhost rewriting
@@ -277,17 +162,13 @@ export class ScanBlockedError extends Error {
 // Scan result types
 // ---------------------------------------------------------------------------
 
-export interface ViolationCounts {
-  critical: number;
-  serious: number;
-  moderate: number;
-  minor: number;
-  total: number;
-}
-
 export interface ScanResult {
   violations: ViolationCounts;
-  rawViolations: string;
+  reviewViolations: ViolationCounts;
+  rawFindings: string;
+  findingsVersion: typeof FINDINGS_VERSION;
+  engineProfile: EngineProfile;
+  engineSummary: EngineSummary;
   pageTitle: string;
   safeMode: boolean;
   truncated: boolean;
@@ -307,13 +188,19 @@ export interface ScanOptions {
   browserWSEndpoint?: string;
   /** When true, capture a JPEG screenshot of the page before running axe-core. */
   captureScreenshot?: boolean;
+  /** Which engine profile to run. Defaults to "strict". */
+  engineProfile?: EngineProfile;
   /** Viewport to scan. Defaults to "desktop". */
   viewport?: "desktop" | "mobile";
 }
 
 export interface ViewportScanResult {
   violations: ViolationCounts;
-  rawViolations: string;
+  reviewViolations: ViolationCounts;
+  rawFindings: string;
+  findingsVersion: typeof FINDINGS_VERSION;
+  engineProfile: EngineProfile;
+  engineSummary: EngineSummary;
   safeMode: boolean;
   truncated: boolean;
   screenshot?: Buffer;
@@ -356,95 +243,7 @@ async function detectPlatform(
   return platform;
 }
 
-// ---------------------------------------------------------------------------
-// Curated safe rules
-// ---------------------------------------------------------------------------
-
-// Rules that are stable and don't crash on complex sites.
-// These avoid color analysis and complex DOM traversal that causes
-// toLowerCase errors on heavy pages.
-const SAFE_RULES = [
-  // Images
-  "image-alt",
-  "image-redundant-alt",
-  "input-image-alt",
-  "area-alt",
-  // Forms
-  "label",
-  "form-field-multiple-labels",
-  "select-name",
-  "input-button-name",
-  // Links & buttons
-  "link-name",
-  "button-name",
-  // Document structure
-  "document-title",
-  "html-has-lang",
-  "html-lang-valid",
-  "valid-lang",
-  "page-has-heading-one",
-  "bypass",
-  // Tables
-  "td-headers-attr",
-  "th-has-data-cells",
-  "table-fake-caption",
-  // Semantic structure
-  "landmark-one-main",
-  "region",
-  "heading-order",
-  "empty-heading",
-  "duplicate-id",
-  "duplicate-id-active",
-  "duplicate-id-aria",
-  // ARIA
-  "aria-allowed-attr",
-  "aria-hidden-body",
-  "aria-hidden-focus",
-  "aria-required-attr",
-  "aria-required-children",
-  "aria-required-parent",
-  "aria-roles",
-  "aria-valid-attr",
-  "aria-valid-attr-value",
-  // Focus & keyboard
-  "tabindex",
-  "focus-order-semantics",
-  // Media
-  "video-caption",
-  "audio-caption",
-  // Misc important ones
-  "meta-viewport",
-  "meta-refresh",
-  "blink",
-  "marquee",
-  "server-side-image-map",
-];
-
-// ---------------------------------------------------------------------------
-// ScanModeInfo builders
-// ---------------------------------------------------------------------------
-
 export { type ScanModeInfo } from "./scan/strategies/types";
-
-function buildFullScanMode(rulesRun: number): ScanModeInfo {
-  return { mode: "full", rulesRun, skippedCategories: [] };
-}
-
-function buildSafeRulesScanMode(
-  rulesRun: number,
-  errorMessage: string,
-): ScanModeInfo {
-  return {
-    mode: "safe-rules",
-    reason: `Full scan failed: ${errorMessage}. Fell back to safe rule subset.`,
-    rulesRun,
-    skippedCategories: SAFE_MODE_SKIPPED_CATEGORIES.map((c) => ({
-      name: c.name,
-      reason: c.reason,
-      ruleIds: [...c.ruleIds],
-    })),
-  };
-}
 
 // ---------------------------------------------------------------------------
 // Reusable helpers for scan functions
@@ -500,110 +299,6 @@ async function capturePageScreenshot(
   }
 }
 
-async function runAxeOnPage(
-  page: import("playwright").Page,
-  axeSource: string,
-): Promise<{
-  violations: ViolationCounts;
-  rawViolations: string;
-  safeMode: boolean;
-  truncated: boolean;
-  warning?: string;
-  scanModeInfo: ScanModeInfo;
-}> {
-  await page.evaluate(axeSource);
-
-  let results;
-  let usedSafeMode = false;
-  let fullScanError = "";
-
-  const fullScanResult = await page
-    .evaluate(async () => {
-      // @ts-expect-error axe is injected globally
-      const axe = window.axe;
-      axe.reset();
-      return await axe.run(document.body, { resultTypes: ["violations"] });
-    })
-    .catch((error: Error) => ({ error: error.message }));
-
-  if ("error" in fullScanResult && fullScanResult.error) {
-    fullScanError = fullScanResult.error;
-    console.error(`Full scan failed (${fullScanError}), retrying with safe rules...`);
-
-    results = await page
-      .evaluate(async (rules: string[]) => {
-        // @ts-expect-error axe is injected globally
-        const axe = window.axe;
-        axe.reset();
-        try {
-          return await axe.run(document.body, {
-            runOnly: { type: "rule", values: rules },
-            resultTypes: ["violations"],
-            elementRef: false,
-          });
-        } catch (e) {
-          console.error("Safe mode failed, trying minimal scan:", e);
-          const mainEl =
-            document.querySelector("main") ||
-            document.querySelector("article") ||
-            document.querySelector("#content") ||
-            document.querySelector("#main");
-          if (mainEl) {
-            try {
-              return await axe.run(mainEl, {
-                runOnly: {
-                  type: "rule",
-                  values: ["image-alt", "link-name", "button-name", "label", "document-title"],
-                },
-                resultTypes: ["violations"],
-                elementRef: false,
-              });
-            } catch { /* Even minimal scan failed */ }
-          }
-          return { violations: [], _warning: "Site too complex for automated scanning" };
-        }
-      }, SAFE_RULES)
-      .catch((error: Error) => ({ error: error.message, violations: [] }));
-
-    usedSafeMode = true;
-  } else {
-    results = fullScanResult;
-  }
-
-  if ("error" in results && results.error) {
-    throw new Error(`Accessibility scan failed: ${results.error}`);
-  }
-
-  const warning = "_warning" in results ? (results._warning as string) : undefined;
-
-  const violations: ViolationCounts = {
-    critical: 0, serious: 0, moderate: 0, minor: 0,
-    total: results.violations.length,
-  };
-
-  results.violations.forEach((violation: { impact?: string }) => {
-    if (violation.impact === "critical") violations.critical++;
-    else if (violation.impact === "serious") violations.serious++;
-    else if (violation.impact === "moderate") violations.moderate++;
-    else violations.minor++;
-  });
-
-  const { serialized: rawViolations, truncated } = truncateViolations(
-    results.violations as AxeViolationRaw[],
-  );
-
-  const rulesRun = results.violations.length + (results.passes?.length ?? 0);
-  const scanModeInfo = usedSafeMode
-    ? buildSafeRulesScanMode(rulesRun, fullScanError)
-    : buildFullScanMode(rulesRun);
-
-  return {
-    violations, rawViolations, safeMode: usedSafeMode, truncated,
-    scanModeInfo,
-    ...(warning && { warning }),
-  };
-}
-
 // ---------------------------------------------------------------------------
 // Main scan function
 // ---------------------------------------------------------------------------
@@ -621,6 +316,7 @@ export async function scanUrl(
   url: string,
   options: ScanOptions = {},
 ): Promise<ScanResult> {
+  const engineProfile = options.engineProfile ?? "strict";
   // When scanning through a Docker-based remote browser, rewrite localhost
   // targets so the container can reach the host machine.
   const { url: effectiveUrl, rewritten: urlRewritten } =
@@ -765,13 +461,11 @@ export async function scanUrl(
       }
     }
 
-    // Run axe-core (full scan first, falls back to safe rules if it crashes)
-    const axeSource = await getAxeCoreSource();
-    const axeResult = await runAxeOnPage(page, axeSource);
+    const auditResult = await runEnginesOnPage(page, engineProfile);
 
     // Combine warnings (scan warnings + Docker rewrite notice)
     const combinedWarnings = [
-      axeResult.warning,
+      auditResult.warning,
       urlRewritten
         ? `URL rewritten from localhost to host.docker.internal for Docker-based browser.`
         : undefined,
@@ -780,12 +474,16 @@ export async function scanUrl(
       .join(" ");
 
     return {
-      violations: axeResult.violations,
-      rawViolations: axeResult.rawViolations,
+      violations: auditResult.violations,
+      reviewViolations: auditResult.reviewViolations,
+      rawFindings: auditResult.rawFindings,
+      findingsVersion: auditResult.findingsVersion,
+      engineProfile: auditResult.engineProfile,
+      engineSummary: auditResult.engineSummary,
       pageTitle,
-      safeMode: axeResult.safeMode,
-      truncated: axeResult.truncated,
-      scanModeInfo: axeResult.scanModeInfo,
+      safeMode: auditResult.scanModeInfo.mode !== "full",
+      truncated: auditResult.truncated,
+      scanModeInfo: auditResult.scanModeInfo,
       ...(combinedWarnings && { warning: combinedWarnings }),
       ...(screenshot && { screenshot }),
       ...(screenshotWarning && { screenshotWarning }),
@@ -817,6 +515,7 @@ export async function scanUrlDual(
   url: string,
   options: ScanOptions = {},
 ): Promise<DualScanResult> {
+  const engineProfile = options.engineProfile ?? "strict";
   const { url: effectiveUrl, rewritten: urlRewritten } =
     rewriteLocalhostForDocker(url, options.browserWSEndpoint);
 
@@ -893,15 +592,12 @@ export async function scanUrlDual(
 
     await navigateAndWait(mobilePage, effectiveUrl, isRemoteBrowser);
 
-    // ---- Parallel: axe scan + screenshot on both viewports -------------------
-    const axeSource = await getAxeCoreSource();
-
     type ScreenshotResult = { screenshot?: Buffer; screenshotWarning?: string };
     const emptyShot: ScreenshotResult = {};
 
     const [desktopScan, mobileScan, desktopShot, mobileShot] = await Promise.all([
-      runAxeOnPage(desktopPage, axeSource),
-      runAxeOnPage(mobilePage, axeSource),
+      runEnginesOnPage(desktopPage, engineProfile),
+      runEnginesOnPage(mobilePage, engineProfile),
       options.captureScreenshot
         ? capturePageScreenshot(desktopPage, DESKTOP_CONFIG.viewport.width)
         : Promise.resolve(emptyShot),
@@ -919,13 +615,29 @@ export async function scanUrlDual(
 
     return {
       desktop: {
-        ...desktopScan,
+        violations: desktopScan.violations,
+        reviewViolations: desktopScan.reviewViolations,
+        rawFindings: desktopScan.rawFindings,
+        findingsVersion: desktopScan.findingsVersion,
+        engineProfile: desktopScan.engineProfile,
+        engineSummary: desktopScan.engineSummary,
+        safeMode: desktopScan.scanModeInfo.mode !== "full",
+        truncated: desktopScan.truncated,
+        scanModeInfo: desktopScan.scanModeInfo,
         ...(desktopShot.screenshot && { screenshot: desktopShot.screenshot }),
         ...(desktopShot.screenshotWarning && { screenshotWarning: desktopShot.screenshotWarning }),
         ...(desktopWarnings && { warning: desktopWarnings }),
       },
       mobile: {
-        ...mobileScan,
+        violations: mobileScan.violations,
+        reviewViolations: mobileScan.reviewViolations,
+        rawFindings: mobileScan.rawFindings,
+        findingsVersion: mobileScan.findingsVersion,
+        engineProfile: mobileScan.engineProfile,
+        engineSummary: mobileScan.engineSummary,
+        safeMode: mobileScan.scanModeInfo.mode !== "full",
+        truncated: mobileScan.truncated,
+        scanModeInfo: mobileScan.scanModeInfo,
         ...(mobileShot.screenshot && { screenshot: mobileShot.screenshot }),
         ...(mobileShot.screenshotWarning && { screenshotWarning: mobileShot.screenshotWarning }),
         ...(mobileWarnings && { warning: mobileWarnings }),

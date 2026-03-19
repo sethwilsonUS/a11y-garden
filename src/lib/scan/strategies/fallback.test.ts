@@ -8,6 +8,7 @@ function makeOpts(
   return {
     viewport: "desktop",
     captureScreenshot: false,
+    engineProfile: "strict",
     timeBudgetMs: 240_000,
     isAuthenticated: true,
     ...overrides,
@@ -19,7 +20,14 @@ function makeResult(
 ): StrategyScanResult {
   return {
     violations: { critical: 0, serious: 0, moderate: 0, minor: 0, total: 0 },
-    rawViolations: "[]",
+    reviewViolations: { critical: 0, serious: 0, moderate: 0, minor: 0, total: 0 },
+    rawFindings: "[]",
+    findingsVersion: 2,
+    engineProfile: "strict",
+    engineSummary: {
+      selectedEngines: ["axe"],
+      engines: [],
+    },
     truncated: false,
     scanMode: { mode: "full", rulesRun: 80, skippedCategories: [] },
     ...overrides,

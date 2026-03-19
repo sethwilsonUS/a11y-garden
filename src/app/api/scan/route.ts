@@ -13,6 +13,7 @@ import {
   type ScanStrategyOptions,
   type ScanModeInfo,
 } from "@/lib/scan/strategies";
+import type { EngineProfile } from "@/lib/findings";
 import {
   getDomainStrategy,
   setDomainStrategy,
@@ -112,13 +113,32 @@ export async function POST(request: NextRequest) {
 
     try {
       // ---- Request validation ------------------------------------------------
-      const { url: rawUrl, auditId: rawAuditId } = await request.json();
+      const {
+        url: rawUrl,
+        auditId: rawAuditId,
+        engineProfile: rawEngineProfile,
+      } = await request.json();
       auditId = rawAuditId as Id<"audits"> | undefined;
+      const requestedEngineProfile: EngineProfile =
+        rawEngineProfile === "comprehensive" ? "comprehensive" : "strict";
+      const engineProfile: EngineProfile = requestedEngineProfile;
 
       if (!rawUrl) {
         return NextResponse.json(
           { error: "URL is required" },
           { status: 400 },
+        );
+      }
+
+      if (!isAuthenticated && requestedEngineProfile === "comprehensive") {
+        return NextResponse.json(
+          {
+            error:
+              "Sign in to unlock comprehensive multi-engine scans and other advanced features.",
+            requiresAuth: true,
+            featureGate: "engineProfile",
+          },
+          { status: 403 },
         );
       }
 
@@ -178,6 +198,7 @@ export async function POST(request: NextRequest) {
 
       const strategyOpts: Omit<ScanStrategyOptions, "viewport"> = {
         captureScreenshot: true,
+        engineProfile,
         timeBudgetMs: 240_000,
         isAuthenticated,
         onProgress: (msg) => { emitProgress(msg); },
@@ -276,10 +297,14 @@ export async function POST(request: NextRequest) {
             await convex.mutation(api.audits.updateAuditWithResults, {
               auditId,
               violations: desktopResult.violations,
+              reviewViolations: desktopResult.reviewViolations,
               letterGrade: combined.grade,
               score: combined.score,
               gradingVersion: GRADING_VERSION,
-              rawViolations: desktopResult.rawViolations,
+              rawFindings: desktopResult.rawFindings,
+              findingsVersion: desktopResult.findingsVersion,
+              engineProfile: desktopResult.engineProfile,
+              engineSummary: JSON.stringify(desktopResult.engineSummary),
               status: "complete" as const,
               scanMode: toScanModeField(desktopResult.scanMode),
               ...(desktopResult.scanMode
@@ -307,9 +332,11 @@ export async function POST(request: NextRequest) {
                 ? { platform: desktopResult.platform }
                 : {}),
               mobileViolations: mobileResult.violations,
+              mobileReviewViolations: mobileResult.reviewViolations,
               mobileLetterGrade: mobileGrade.grade,
               mobileScore: mobileGrade.score,
-              mobileRawViolations: mobileResult.rawViolations,
+              mobileRawFindings: mobileResult.rawFindings,
+              mobileEngineSummary: JSON.stringify(mobileResult.engineSummary),
               mobileScanMode: toScanModeField(mobileResult.scanMode),
               ...(mobileResult.scanMode
                 ? {
@@ -344,6 +371,8 @@ export async function POST(request: NextRequest) {
         gradingVersion: GRADING_VERSION,
         ...(desktopResult.pageTitle && { pageTitle: desktopResult.pageTitle }),
         ...(desktopResult.platform && { platform: desktopResult.platform }),
+        engineProfile: desktopResult.engineProfile,
+        findingsVersion: desktopResult.findingsVersion,
 
         letterGrade: combined.grade,
         score: combined.score,
@@ -363,9 +392,13 @@ export async function POST(request: NextRequest) {
 
         desktop: {
           violations: desktopResult.violations,
+          reviewViolations: desktopResult.reviewViolations,
           letterGrade: desktopGrade.grade,
           score: desktopGrade.score,
-          rawViolations: desktopResult.rawViolations,
+          rawFindings: desktopResult.rawFindings,
+          findingsVersion: desktopResult.findingsVersion,
+          engineProfile: desktopResult.engineProfile,
+          engineSummary: desktopResult.engineSummary,
           safeMode: desktopResult.scanMode.mode !== "full",
           scanMode: toScanModeField(desktopResult.scanMode),
           scanModeDetail: desktopResult.scanMode,
@@ -381,9 +414,13 @@ export async function POST(request: NextRequest) {
 
         mobile: {
           violations: mobileResult.violations,
+          reviewViolations: mobileResult.reviewViolations,
           letterGrade: mobileGrade.grade,
           score: mobileGrade.score,
-          rawViolations: mobileResult.rawViolations,
+          rawFindings: mobileResult.rawFindings,
+          findingsVersion: mobileResult.findingsVersion,
+          engineProfile: mobileResult.engineProfile,
+          engineSummary: mobileResult.engineSummary,
           safeMode: mobileResult.scanMode.mode !== "full",
           scanMode: toScanModeField(mobileResult.scanMode),
           scanModeDetail: mobileResult.scanMode,
@@ -409,7 +446,7 @@ export async function POST(request: NextRequest) {
       console.warn(
         `[Scan] Response size: ${responseSizeMB}MB ` +
         `(desktop screenshot: ${desktopScreenshotKB}KB, mobile: ${mobileScreenshotKB}KB, ` +
-        `rawViolations: ${Math.round((desktopResult.rawViolations.length + mobileResult.rawViolations.length) / 1024)}KB)`,
+        `rawFindings: ${Math.round((desktopResult.rawFindings.length + mobileResult.rawFindings.length) / 1024)}KB)`,
       );
 
       // Vercel has a 4.5MB response body limit. If we're over, drop screenshots
@@ -424,9 +461,13 @@ export async function POST(request: NextRequest) {
           ...responsePayload,
           desktop: {
             violations: desktopResult.violations,
+            reviewViolations: desktopResult.reviewViolations,
             letterGrade: desktopGrade.grade,
             score: desktopGrade.score,
-            rawViolations: desktopResult.rawViolations,
+            rawFindings: desktopResult.rawFindings,
+            findingsVersion: desktopResult.findingsVersion,
+            engineProfile: desktopResult.engineProfile,
+            engineSummary: desktopResult.engineSummary,
             safeMode: desktopResult.scanMode.mode !== "full",
             scanMode: toScanModeField(desktopResult.scanMode),
             scanModeDetail: desktopResult.scanMode,
@@ -436,9 +477,13 @@ export async function POST(request: NextRequest) {
           },
           mobile: {
             violations: mobileResult.violations,
+            reviewViolations: mobileResult.reviewViolations,
             letterGrade: mobileGrade.grade,
             score: mobileGrade.score,
-            rawViolations: mobileResult.rawViolations,
+            rawFindings: mobileResult.rawFindings,
+            findingsVersion: mobileResult.findingsVersion,
+            engineProfile: mobileResult.engineProfile,
+            engineSummary: mobileResult.engineSummary,
             safeMode: mobileResult.scanMode.mode !== "full",
             scanMode: toScanModeField(mobileResult.scanMode),
             scanModeDetail: mobileResult.scanMode,
