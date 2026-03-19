@@ -14,7 +14,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { use, useEffect, useRef, useState, useCallback } from "react";
 import { useAuth, SignInButton } from "@clerk/nextjs";
-import { ScanModeBanner } from "@/components/ScanModeBanner";
 import { WafBadge } from "@/components/WafBadge";
 import { ScreenshotSection } from "@/components/ScreenshotSection";
 import { AgentPlanButton } from "@/components/AgentPlanButton";
@@ -830,18 +829,13 @@ export default function ResultsPage({
                   </div>
                 )}
 
-                {/* Scan Mode Banner (safe mode, structural scan, or full scan confirmation) */}
-                <ScanModeBanner
+                <EngineSummaryAccordion
+                  engineProfile={audit.engineProfile}
+                  engineSummary={vpEngineSummary}
                   scanMode={vpScanMode}
                   scanModeDetail={vpScanModeDetail}
                   viewport={vpViewport}
                   totalViolations={vpViolations.total}
-                  engineProfile={audit.engineProfile}
-                />
-
-                <EngineSummaryAccordion
-                  engineProfile={audit.engineProfile}
-                  engineSummary={vpEngineSummary}
                   headingLevel="h2"
                 />
 
@@ -849,7 +843,7 @@ export default function ResultsPage({
                 {audit.robotsDisallowed && vpViewport === "desktop" && (
                   <div
                     className="rounded-xl p-4 flex items-start gap-3 border border-theme"
-                    style={{ backgroundColor: "var(--color-surface-secondary)" }}
+                    style={{ backgroundColor: "var(--bg-secondary)" }}
                     role="note"
                     aria-label="robots.txt advisory"
                   >
