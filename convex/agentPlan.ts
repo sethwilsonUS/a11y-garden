@@ -2,7 +2,7 @@
 
 import { v } from "convex/values";
 import { action } from "./_generated/server";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import OpenAI from "openai";
 import { DEFAULT_MAX_GROUPS, groupViolations } from "./lib/groupViolations";
 import { buildAgentPlanPrompt } from "./lib/buildAgentPlanPrompt";
@@ -126,7 +126,7 @@ export async function generateAgentPlanCore(
   args: { auditId: string },
 ): Promise<AgentPlanResult> {
   try {
-    const audit = (await deps.runQuery(api.audits.getAudit, {
+    const audit = (await deps.runQuery(internal.audits.getAuditInternal, {
       auditId: args.auditId,
     })) as Record<string, unknown> | null;
 
@@ -236,7 +236,7 @@ export const generateAgentPlan = action({
       return { success: false, error: "You must be signed in to generate a fix plan." } as AgentPlanResult;
     }
 
-    const audit = (await ctx.runQuery(api.audits.getAudit, {
+    const audit = (await ctx.runQuery(internal.audits.getAuditInternal, {
       auditId: args.auditId,
     })) as Record<string, unknown> | null;
 

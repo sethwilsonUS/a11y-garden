@@ -33,7 +33,7 @@ export async function generateMetadata({
 
   try {
     const client = new ConvexHttpClient(CONVEX_URL);
-    const audit = await client.query(api.audits.getAudit, {
+    const audit = await client.query(api.audits.getAuditForViewer, {
       auditId: auditId as Id<"audits">,
     });
 

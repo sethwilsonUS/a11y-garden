@@ -2,7 +2,7 @@
 
 import { v } from "convex/values";
 import { action } from "./_generated/server";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import { DEFAULT_AI_MODEL, generateAISummary } from "../src/lib/ai-summary";
 
 export const analyzeViolations = action({
@@ -15,7 +15,7 @@ export const analyzeViolations = action({
         );
       }
 
-      const audit = await ctx.runQuery(api.audits.getAudit, {
+      const audit = await ctx.runQuery(internal.audits.getAuditInternal, {
         auditId: args.auditId,
       });
 

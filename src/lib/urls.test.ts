@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { buildResultsUrl, slugifyUrl, parseResultsSegments } from "./urls";
+import {
+  buildExtensionResultsUrl,
+  buildResultsUrl,
+  slugifyUrl,
+  parseResultsSegments,
+} from "./urls";
 
 // ---------------------------------------------------------------------------
 // slugifyUrl
@@ -94,6 +99,16 @@ describe("buildResultsUrl", () => {
     expect(buildResultsUrl("https://example.com", scannedAt, "id")).toBe(
       "/results/example.com/2026-01-05/id",
     );
+  });
+});
+
+describe("buildExtensionResultsUrl", () => {
+  it("adds the extension source flag without exposing any token", () => {
+    const scannedAt = new Date("2026-02-20T12:30:00Z").getTime();
+
+    expect(
+      buildExtensionResultsUrl("https://github.com", scannedAt, "abc123"),
+    ).toBe("/results/github.com/2026-02-20/abc123?source=extension");
   });
 });
 

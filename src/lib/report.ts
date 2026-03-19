@@ -52,6 +52,11 @@ export interface ReportData {
   platform?: string;
   /** Platform-specific fix advice from AI */
   platformTip?: string;
+  scanSource?: "web" | "cli" | "extension";
+  viewportMode?: "paired" | "desktop-only" | "live";
+  viewportWidth?: number;
+  viewportHeight?: number;
+  isClaimed?: boolean;
   // Mobile viewport results (optional — missing for desktop-only/legacy audits)
   mobileViolations?: ViolationCounts;
   mobileReviewViolations?: ViolationCounts;
@@ -147,11 +152,18 @@ export function generateMarkdownReport(
     day: "numeric",
   });
 
+  const viewportLabel = audit.viewportMode === "live"
+    ? `\n**Viewport:** Live tab${audit.viewportWidth && audit.viewportHeight ? ` (${audit.viewportWidth}×${audit.viewportHeight})` : ""}`
+    : "";
+  const extensionPrivacyNote = audit.scanSource === "extension"
+    ? "\n**Privacy:** Extension scans do not store screenshots by default."
+    : "";
+
   let markdown = `# ${audit.pageTitle ? `${audit.pageTitle} — Accessibility Report` : "Accessibility Report"}
 
 **URL:** ${audit.url}
 **Grade:** ${audit.letterGrade} (${audit.score}/100)
-**Scanned:** ${date}${audit.scanMode === "safe" ? "\n**Note:** This scan ran in Safe Mode due to site complexity. Not all checks were performed." : ""}${audit.scanMode === "jsdom-structural" ? "\n**Note:** This scan ran in structural mode because the site required a firewall bypass. Visual and interaction-dependent checks were skipped." : ""}${reportUrl ? `\n**Full Report:** ${reportUrl}` : ""}
+**Scanned:** ${date}${viewportLabel}${extensionPrivacyNote}${audit.scanMode === "safe" ? "\n**Note:** This scan ran in Safe Mode due to site complexity. Not all checks were performed." : ""}${audit.scanMode === "jsdom-structural" ? "\n**Note:** This scan ran in structural mode because the site required a firewall bypass. Visual and interaction-dependent checks were skipped." : ""}${reportUrl ? `\n**Full Report:** ${reportUrl}` : ""}
 
 > *This report reflects automated checks only and is not a substitute for a comprehensive WCAG audit.*
 

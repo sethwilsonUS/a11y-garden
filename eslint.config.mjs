@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Project-generated artifacts and vendored bundles.
+    "coverage/**",
+    "convex/_generated/**",
+    "extension/dist/**",
   ]),
 ]);
 
