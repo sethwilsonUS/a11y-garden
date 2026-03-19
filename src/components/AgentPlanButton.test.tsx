@@ -33,6 +33,7 @@ function makeAuditProps(overrides: Record<string, unknown> = {}) {
     agentPlanFileId: undefined as string | undefined,
     domain: "example.com",
     isOwner: true,
+    isSignedIn: true,
     ...overrides,
   };
 }
@@ -96,6 +97,13 @@ describe("AgentPlanButton", () => {
     it("does not render when isOwner is false", () => {
       const { container } = render(
         <AgentPlanButton {...makeAuditProps({ isOwner: false })} />,
+      );
+      expect(container.innerHTML).toBe("");
+    });
+
+    it("does not render when the user is signed out", () => {
+      const { container } = render(
+        <AgentPlanButton {...makeAuditProps({ isSignedIn: false })} />,
       );
       expect(container.innerHTML).toBe("");
     });

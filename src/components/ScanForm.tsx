@@ -2,12 +2,14 @@
 
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useMutation, useQuery } from "convex/react";
-import { useAuth } from "@clerk/nextjs";
+import { SignInButton, useAuth } from "@clerk/nextjs";
 import { api } from "../../convex/_generated/api";
 import { useRouter } from "next/navigation";
 import { Id } from "../../convex/_generated/dataModel";
 import { buildResultsUrl } from "@/lib/urls";
 import { track } from "@/lib/analytics";
+import type { EngineProfile } from "@/lib/findings";
+import { AdvancedFeaturesModal } from "@/components/AdvancedFeaturesModal";
 
 const SCAN_PROGRESS_STEPS: [number, string][] = [
   // Phase 1: Lightweight server-side checks (0-3s)
@@ -29,6 +31,7 @@ const SCAN_PROGRESS_STEPS: [number, string][] = [
 
 const WAF_WARNING_THRESHOLD_MS = 30_000;
 const SR_ANNOUNCE_INTERVAL_MS = 10_000;
+const ENGINE_PROFILE_STORAGE_KEY = "a11y-garden-engine-profile";
 
 function formatElapsedSpoken(ms: number): string {
   const totalSec = Math.floor(ms / 1_000);
@@ -101,6 +104,8 @@ export function ScanForm() {
   const { isSignedIn } = useAuth();
   const [url, setUrl] = useState("");
   const [isPublic, setIsPublic] = useState(false);
+  const [engineProfile, setEngineProfile] = useState<EngineProfile>("strict");
+  const [advancedFeaturesOpen, setAdvancedFeaturesOpen] = useState(false);
   const [error, setError] = useState("");
   const [rateLimitInfo, setRateLimitInfo] = useState<{
     message: string;
@@ -125,6 +130,24 @@ export function ScanForm() {
     ? (serverWaf ? serverProgress.slice(4) : serverProgress)
     : scanStatus;
   const showWafBanner = serverWaf || isLikelyWaf;
+  const effectiveEngineProfile: EngineProfile = isSignedIn
+    ? engineProfile
+    : "strict";
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!isSignedIn) return;
+    const saved = window.localStorage.getItem(ENGINE_PROFILE_STORAGE_KEY);
+    if (saved === "strict" || saved === "comprehensive") {
+      setEngineProfile(saved);
+    }
+  }, [isSignedIn]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!isSignedIn) return;
+    window.localStorage.setItem(ENGINE_PROFILE_STORAGE_KEY, engineProfile);
+  }, [engineProfile, isSignedIn]);
 
   // When the Convex subscription shows the audit is complete, interrupt
   // VoiceOver's queued polite progress announcements and stop the timer.
@@ -191,7 +214,7 @@ export function ScanForm() {
       return;
     }
 
-    track("Scan Submitted", { isPublic });
+    track("Scan Submitted", { isPublic, engineProfile: effectiveEngineProfile });
 
     // ---- Self-scan warning (dev only) -----------------------------------------
     let isSelfScanInDev = false;
@@ -233,7 +256,11 @@ export function ScanForm() {
       const response = await fetch("/api/scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: normalizedUrl, auditId }),
+        body: JSON.stringify({
+          url: normalizedUrl,
+          auditId,
+          engineProfile: effectiveEngineProfile,
+        }),
       });
 
       const scanResult = await response.json();
@@ -247,6 +274,24 @@ export function ScanForm() {
           retryAfter: retryAfter ? Number(retryAfter) : undefined,
         });
         await updateAuditError({ auditId, errorMessage: scanResult.error });
+        scanRef.current = null;
+        setActiveAuditId(null);
+        setIsSubmitting(false);
+        stopProgress();
+        return;
+      }
+
+      if (response.status === 403 && scanResult.requiresAuth) {
+        track("Scan Failed", {
+          reason: scanResult.blocked ? "waf_auth_required" : "feature_auth_required",
+        });
+        const msg =
+          scanResult.error ||
+          (scanResult.blocked
+            ? "This site couldn't be scanned. Sign in to unlock alternative scanning methods."
+            : "Sign in to unlock advanced scan features.");
+        setRateLimitInfo({ message: msg });
+        await updateAuditError({ auditId, errorMessage: msg });
         scanRef.current = null;
         setActiveAuditId(null);
         setIsSubmitting(false);
@@ -403,6 +448,72 @@ export function ScanForm() {
         )}
       </div>
 
+      {isSignedIn ? (
+        <fieldset className="rounded-xl border border-theme bg-theme-secondary p-4">
+          <legend className="px-1 text-sm font-semibold text-theme-primary">
+            Scan profile
+          </legend>
+          <p className="text-sm text-theme-secondary mb-4">
+            Strict runs `axe-core` only. Comprehensive adds HTML_CodeSniffer and IBM ACE, with lower-confidence findings separated into a review lane.
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {([
+              {
+                value: "strict" as const,
+                label: "Strict",
+                detail: "Fastest, axe-only, great for enforcing a tight baseline.",
+              },
+              {
+                value: "comprehensive" as const,
+                label: "Comprehensive",
+                detail: "Runs multiple engines and surfaces extra findings that may need manual review.",
+              },
+            ]).map((option) => (
+              <label
+                key={option.value}
+                className={`rounded-xl border p-4 transition-colors ${
+                  isSubmitting
+                    ? "opacity-60 cursor-not-allowed"
+                    : "cursor-pointer hover:bg-theme-primary"
+                } ${
+                  engineProfile === option.value
+                    ? "border-[var(--accent)] bg-theme-primary"
+                    : "border-theme bg-theme-secondary"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="engineProfile"
+                  value={option.value}
+                  checked={engineProfile === option.value}
+                  onChange={() => setEngineProfile(option.value)}
+                  disabled={isSubmitting}
+                  className="sr-only"
+                />
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="font-semibold text-theme-primary">
+                      {option.label}
+                    </p>
+                    <p className="text-sm text-theme-secondary mt-1">
+                      {option.detail}
+                    </p>
+                  </div>
+                  <span
+                    aria-hidden="true"
+                    className={`mt-1 w-4 h-4 rounded-full border-2 ${
+                      engineProfile === option.value
+                        ? "border-[var(--accent)] bg-[var(--accent)]"
+                        : "border-theme"
+                    }`}
+                  />
+                </div>
+              </label>
+            ))}
+          </div>
+        </fieldset>
+      ) : null}
+
       {isSignedIn && (
         <div className="flex items-center gap-3 p-4 bg-theme-secondary rounded-xl border border-theme">
           <label
@@ -493,6 +604,73 @@ export function ScanForm() {
         </span>
       </button>
 
+      {!isSignedIn && (
+        <section
+          className="rounded-xl border border-theme bg-theme-secondary p-4"
+          aria-labelledby="advanced-features-heading"
+          aria-describedby="advanced-features-copy"
+        >
+          <div className="flex items-start gap-3">
+            <div
+              className="flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center"
+              style={{
+                backgroundColor: "var(--accent-bg)",
+                border: "1px solid var(--accent-border)",
+              }}
+              aria-hidden="true"
+            >
+              <svg
+                className="w-5 h-5 text-accent"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z"
+                />
+              </svg>
+            </div>
+            <div className="flex-1">
+              <h2
+                id="advanced-features-heading"
+                className="text-sm font-semibold text-theme-primary"
+              >
+                Log in for advanced features
+              </h2>
+              <p
+                id="advanced-features-copy"
+                className="mt-1 text-sm text-theme-secondary"
+              >
+                Logged-out scans use the strict axe-core baseline. Sign in to
+                unlock comprehensive multi-engine scans, firewall bypass on
+                protected sites, AGENTS.md fix plans, and saved public audits.
+              </p>
+              <div className="mt-4 flex flex-wrap gap-3">
+                <SignInButton mode="modal">
+                  <button
+                    type="button"
+                    className="btn-primary text-sm py-2 cursor-pointer"
+                  >
+                    Log In
+                  </button>
+                </SignInButton>
+                <button
+                  type="button"
+                  onClick={() => setAdvancedFeaturesOpen(true)}
+                  className="px-4 py-2 rounded-lg text-sm font-medium border border-theme text-theme-secondary hover:text-theme-primary hover:bg-theme-primary transition-colors cursor-pointer"
+                  aria-describedby="advanced-features-copy"
+                >
+                  What&apos;s included?
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
+
       {isSubmitting && showWafBanner && (
         <div
           className="mt-3 p-3 rounded-lg bg-blue-50 dark:bg-blue-950/40 border border-blue-300 dark:border-blue-700 text-blue-800 dark:text-blue-200 text-sm flex items-start gap-2.5 animate-in fade-in slide-in-from-top-2 duration-300"
@@ -525,6 +703,11 @@ export function ScanForm() {
             })()
           : ""}
       </div>
+
+      <AdvancedFeaturesModal
+        open={advancedFeaturesOpen}
+        onClose={() => setAdvancedFeaturesOpen(false)}
+      />
     </form>
   );
 }

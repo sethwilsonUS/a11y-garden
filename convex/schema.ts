@@ -24,6 +24,13 @@ export default defineSchema({
       minor: v.number(),
       total: v.number(),
     }),
+    reviewViolations: v.optional(v.object({
+      critical: v.number(),
+      serious: v.number(),
+      moderate: v.number(),
+      minor: v.number(),
+      total: v.number(),
+    })),
 
     // Grading
     letterGrade: v.union(
@@ -61,7 +68,7 @@ export default defineSchema({
     wafBypassed: v.optional(v.boolean()),
     scanDurationMs: v.optional(v.number()),
 
-    // Set when the raw violations payload was trimmed to fit the 500 KB cap
+    // Set when the serialized findings payload was trimmed to fit the audit size budget
     truncated: v.optional(v.boolean()),
 
     // Detected website platform/CMS (e.g. "wordpress", "squarespace")
@@ -74,6 +81,12 @@ export default defineSchema({
     platformTip: v.optional(v.string()),
 
     // Raw data
+    findingsVersion: v.optional(v.number()),
+    engineProfile: v.optional(
+      v.union(v.literal("strict"), v.literal("comprehensive"))
+    ),
+    rawFindings: v.optional(v.string()),
+    engineSummary: v.optional(v.string()),
     rawViolations: v.optional(v.string()),
 
     // Mobile viewport results (all optional for backward compat with pre-mobile audits)
@@ -84,10 +97,19 @@ export default defineSchema({
       minor: v.number(),
       total: v.number(),
     })),
+    mobileReviewViolations: v.optional(v.object({
+      critical: v.number(),
+      serious: v.number(),
+      moderate: v.number(),
+      minor: v.number(),
+      total: v.number(),
+    })),
     mobileLetterGrade: v.optional(v.union(
       v.literal("A"), v.literal("B"), v.literal("C"), v.literal("D"), v.literal("F")
     )),
     mobileScore: v.optional(v.number()),
+    mobileRawFindings: v.optional(v.string()),
+    mobileEngineSummary: v.optional(v.string()),
     mobileRawViolations: v.optional(v.string()),
     mobileScreenshotId: v.optional(v.id("_storage")),
     mobileScanMode: v.optional(v.union(v.literal("full"), v.literal("safe"), v.literal("jsdom-structural"))),

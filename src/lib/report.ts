@@ -6,6 +6,14 @@
  */
 
 import { PLATFORM_LABELS, getPlatformConfidence } from "./platforms";
+import {
+  getFindingNodeCount,
+  parseSerializedFindings,
+  type EngineProfile,
+  type EngineSummary,
+  type FindingDisposition,
+  type ViolationCounts,
+} from "./findings";
 
 // Axe-core violation structure (for report / display purposes)
 export interface AxeNode {
@@ -32,65 +40,99 @@ export interface ReportData {
   scannedAt: number;
   aiSummary?: string;
   topIssues?: string[];
-  violations: {
-    critical: number;
-    serious: number;
-    moderate: number;
-    minor: number;
-    total: number;
-  };
+  violations: ViolationCounts;
+  reviewViolations?: ViolationCounts;
   scanMode?: "full" | "safe" | "jsdom-structural";
+  engineProfile?: EngineProfile;
+  engineSummary?: EngineSummary | string;
+  rawFindings?: string;
+  findingsVersion?: number;
   rawViolations?: string;
   /** Detected website platform/CMS slug (e.g. "wordpress") */
   platform?: string;
   /** Platform-specific fix advice from AI */
   platformTip?: string;
   // Mobile viewport results (optional — missing for desktop-only/legacy audits)
-  mobileViolations?: {
-    critical: number;
-    serious: number;
-    moderate: number;
-    minor: number;
-    total: number;
-  };
+  mobileViolations?: ViolationCounts;
+  mobileReviewViolations?: ViolationCounts;
   mobileLetterGrade?: string;
   mobileScore?: number;
   mobileScanMode?: "full" | "safe" | "jsdom-structural";
+  mobileEngineSummary?: EngineSummary | string;
+  mobileRawFindings?: string;
   mobileRawViolations?: string;
   mobileTruncated?: boolean;
   mobileAiSummary?: string;
   mobileTopIssues?: string[];
 }
 
-function renderViolationsByRule(rawViolations: string): string {
-  let md = "";
+function parseEngineSummary(
+  value?: EngineSummary | string,
+): EngineSummary | undefined {
+  if (!value) return undefined;
+  if (typeof value !== "string") return value;
   try {
-    const violations: AxeViolation[] = JSON.parse(rawViolations);
-    if (violations.length > 0) {
-      md += `\n---\n\n## Violations by Rule\n\n`;
-      const severityOrder = ["critical", "serious", "moderate", "minor"];
-      const grouped = severityOrder.reduce(
-        (acc, severity) => {
-          acc[severity] = violations.filter((v) => v.impact === severity);
-          return acc;
-        },
-        {} as Record<string, AxeViolation[]>,
-      );
-
-      for (const severity of severityOrder) {
-        const items = grouped[severity];
-        if (items && items.length > 0) {
-          md += `### ${severity.charAt(0).toUpperCase() + severity.slice(1)}\n\n`;
-          for (const violation of items) {
-            md += `- **${violation.help}** (\`${violation.id}\`) — ${violation.nodes.length} element${violation.nodes.length === 1 ? "" : "s"}\n`;
-          }
-          md += "\n";
-        }
-      }
-    }
+    return JSON.parse(value) as EngineSummary;
   } catch {
-    // Ignore JSON parse errors
+    return undefined;
   }
+}
+
+function renderEngineSummary(
+  engineProfile?: EngineProfile,
+  engineSummary?: EngineSummary | string,
+): string {
+  const parsed = parseEngineSummary(engineSummary);
+  if (!engineProfile && !parsed) return "";
+
+  let md = "";
+  md += `\n---\n\n## Scan Engines\n\n`;
+  if (engineProfile) {
+    md += `- **Scan profile:** ${engineProfile === "comprehensive" ? "Comprehensive" : "Strict"}\n`;
+  }
+  if (!parsed) {
+    return md;
+  }
+
+  for (const engine of parsed.engines) {
+    const counts = `${engine.confirmedCount} confirmed / ${engine.reviewCount} review`;
+    const note = engine.note ? ` — ${engine.note}` : "";
+    md += `- **${engine.engine}:** ${engine.status} (${counts}, ${engine.durationMs} ms)${note}\n`;
+  }
+
+  return md;
+}
+
+function renderFindingsSection(
+  rawFindings: string | undefined,
+  rawViolations: string | undefined,
+  disposition: FindingDisposition,
+  heading: string,
+): string {
+  const findings = parseSerializedFindings(rawFindings, rawViolations).filter(
+    (finding) => finding.disposition === disposition,
+  );
+  if (findings.length === 0) return "";
+
+  let md = `\n---\n\n## ${heading}\n\n`;
+  if (disposition === "needs-review") {
+    md +=
+      "These items came from lower-confidence checks and should be manually reviewed before treating them as confirmed defects.\n\n";
+  }
+
+  const severityOrder = ["critical", "serious", "moderate", "minor"] as const;
+  for (const severity of severityOrder) {
+    const items = findings.filter((finding) => finding.impact === severity);
+    if (items.length === 0) continue;
+
+    md += `### ${severity.charAt(0).toUpperCase() + severity.slice(1)}\n\n`;
+    for (const finding of items) {
+      const totalNodeCount = getFindingNodeCount(finding);
+      md += `- **${finding.help}** (\`${finding.id}\`) — ${totalNodeCount} affected element${totalNodeCount === 1 ? "" : "s"}\n`;
+    }
+    md += "\n";
+  }
+
   return md;
 }
 
@@ -109,7 +151,7 @@ export function generateMarkdownReport(
 
 **URL:** ${audit.url}
 **Grade:** ${audit.letterGrade} (${audit.score}/100)
-**Scanned:** ${date}${audit.scanMode === "safe" ? "\n**Note:** This scan ran in Safe Mode due to site complexity. Not all checks were performed." : ""}${reportUrl ? `\n**Full Report:** ${reportUrl}` : ""}
+**Scanned:** ${date}${audit.scanMode === "safe" ? "\n**Note:** This scan ran in Safe Mode due to site complexity. Not all checks were performed." : ""}${audit.scanMode === "jsdom-structural" ? "\n**Note:** This scan ran in structural mode because the site required a firewall bypass. Visual and interaction-dependent checks were skipped." : ""}${reportUrl ? `\n**Full Report:** ${reportUrl}` : ""}
 
 > *This report reflects automated checks only and is not a substitute for a comprehensive WCAG audit.*
 
@@ -125,6 +167,14 @@ export function generateMarkdownReport(
 | Minor | ${audit.violations.minor} |
 | **Total** | **${audit.violations.total}** |
 `;
+
+  if (audit.reviewViolations && audit.reviewViolations.total > 0) {
+    markdown += `\nLower-confidence findings needing manual review: **${audit.reviewViolations.total}**`;
+  }
+
+  markdown += "\n\nGrades are based on confirmed findings only.\n";
+
+  markdown += renderEngineSummary(audit.engineProfile, audit.engineSummary);
 
   if (audit.aiSummary) {
     markdown += `
@@ -162,9 +212,18 @@ ${audit.platformTip}
 `;
   }
 
-  if (audit.rawViolations) {
-    markdown += renderViolationsByRule(audit.rawViolations);
-  }
+  markdown += renderFindingsSection(
+    audit.rawFindings,
+    audit.rawViolations,
+    "confirmed",
+    "Violations by Rule",
+  );
+  markdown += renderFindingsSection(
+    audit.rawFindings,
+    audit.rawViolations,
+    "needs-review",
+    "Needs Review",
+  );
 
   // Mobile viewport section (only included when mobile data exists)
   if (audit.mobileViolations) {
@@ -172,6 +231,8 @@ ${audit.platformTip}
     markdown += `**Grade:** ${audit.mobileLetterGrade ?? "N/A"} (${audit.mobileScore ?? "N/A"}/100)\n`;
     if (audit.mobileScanMode === "safe") {
       markdown += `**Note:** Mobile scan ran in Safe Mode due to site complexity.\n`;
+    } else if (audit.mobileScanMode === "jsdom-structural") {
+      markdown += `**Note:** Mobile scan ran in structural mode because the site required a firewall bypass.\n`;
     }
 
     markdown += `\n| Severity | Count |\n|----------|-------|\n`;
@@ -180,6 +241,12 @@ ${audit.platformTip}
     markdown += `| Moderate | ${audit.mobileViolations.moderate} |\n`;
     markdown += `| Minor | ${audit.mobileViolations.minor} |\n`;
     markdown += `| **Total** | **${audit.mobileViolations.total}** |\n`;
+
+    if (audit.mobileReviewViolations && audit.mobileReviewViolations.total > 0) {
+      markdown += `\nLower-confidence findings needing manual review: **${audit.mobileReviewViolations.total}**\n`;
+    }
+
+    markdown += renderEngineSummary(audit.engineProfile, audit.mobileEngineSummary);
 
     if (audit.mobileAiSummary) {
       markdown += `\n### Mobile AI Summary\n\n${audit.mobileAiSummary}\n`;
@@ -190,9 +257,18 @@ ${audit.platformTip}
       markdown += audit.mobileTopIssues.map((issue, i) => `${i + 1}. ${issue}`).join("\n") + "\n";
     }
 
-    if (audit.mobileRawViolations) {
-      markdown += renderViolationsByRule(audit.mobileRawViolations).replace("## Violations by Rule", "### Mobile Violations by Rule");
-    }
+    markdown += renderFindingsSection(
+      audit.mobileRawFindings,
+      audit.mobileRawViolations,
+      "confirmed",
+      "Mobile Violations by Rule",
+    ).replace("\n## ", "\n### ");
+    markdown += renderFindingsSection(
+      audit.mobileRawFindings,
+      audit.mobileRawViolations,
+      "needs-review",
+      "Mobile Needs Review",
+    ).replace("\n## ", "\n### ");
   }
 
   markdown += `

@@ -69,13 +69,13 @@ describe("generateAgentPlanCore", () => {
   // ─────────────────────────────────────────────────────────────────────────
 
   describe("successful generation", () => {
-    it("calls OpenAI with the correct model name (gpt-4.1-mini)", async () => {
+    it("calls OpenAI with the correct model name (gpt-5.4-mini)", async () => {
       const deps = makeDeps();
       await generateAgentPlanCore(deps, { auditId: "audit-123" });
 
       expect(deps.openaiCreate).toHaveBeenCalledOnce();
       const callArgs = deps.openaiCreate.mock.calls[0][0];
-      expect(callArgs.model).toBe("gpt-4.1-mini");
+      expect(callArgs.model).toBe("gpt-5.4-mini");
     });
 
     it("passes system and user prompts from buildAgentPlanPrompt correctly", async () => {
@@ -90,13 +90,13 @@ describe("generateAgentPlanCore", () => {
       expect(callArgs.messages[1].content.length).toBeGreaterThan(0);
     });
 
-    it("sets temperature to 0.3 and max_tokens to 4096", async () => {
+    it("sets temperature to 0.3 and max_completion_tokens to 4096", async () => {
       const deps = makeDeps();
       await generateAgentPlanCore(deps, { auditId: "audit-123" });
 
       const callArgs = deps.openaiCreate.mock.calls[0][0];
       expect(callArgs.temperature).toBe(0.3);
-      expect(callArgs.max_tokens).toBe(4096);
+      expect(callArgs.max_completion_tokens).toBe(4096);
     });
 
     it("stores the generated markdown in Convex file storage", async () => {
@@ -141,6 +141,34 @@ describe("generateAgentPlanCore", () => {
       // Both the desktop "color-contrast" and mobile "image-alt" should appear
       expect(userPrompt).toContain("color-contrast");
       expect(userPrompt).toContain("image-alt");
+    });
+
+    it("passes scan coverage context and confirmed-only counts into the prompt", async () => {
+      const deps = makeDeps({
+        runQuery: vi.fn().mockResolvedValue(
+          makeAudit({
+            engineProfile: "comprehensive",
+            engineSummary: JSON.stringify({
+              selectedEngines: ["axe", "htmlcs", "ace"],
+              engines: [
+                { engine: "axe", status: "completed", durationMs: 1, confirmedCount: 1, reviewCount: 0 },
+                { engine: "htmlcs", status: "failed", durationMs: 1, confirmedCount: 0, reviewCount: 0, note: "Timed out" },
+                { engine: "ace", status: "completed", durationMs: 1, confirmedCount: 1, reviewCount: 0 },
+              ],
+            }),
+            truncated: true,
+          }),
+        ),
+      });
+
+      await generateAgentPlanCore(deps, { auditId: "audit-123" });
+
+      const callArgs = deps.openaiCreate.mock.calls[0][0];
+      const userPrompt: string = callArgs.messages[1].content;
+      expect(userPrompt).toContain("Scan profile: Comprehensive");
+      expect(userPrompt).toContain("Confirmed findings available: 2 confirmed findings");
+      expect(userPrompt).toContain("Desktop engine coverage was partial");
+      expect(userPrompt).toContain("representative rather than exhaustive");
     });
   });
 
@@ -190,10 +218,13 @@ describe("generateAgentPlanCore", () => {
   // ─────────────────────────────────────────────────────────────────────────
 
   describe("missing or empty violations", () => {
-    it("returns { success: false, error } when rawViolations is missing", async () => {
+    it("returns { success: false, error } when no findings are available", async () => {
       const deps = makeDeps({
         runQuery: vi.fn().mockResolvedValue(
-          makeAudit({ rawViolations: undefined }),
+          makeAudit({
+            rawViolations: undefined,
+            mobileRawViolations: undefined,
+          }),
         ),
       });
 
@@ -215,6 +246,41 @@ describe("generateAgentPlanCore", () => {
 
       expect(result.success).toBe(false);
       expect(result).toHaveProperty("error");
+      expect(deps.openaiCreate).not.toHaveBeenCalled();
+    });
+
+    it("returns { success: false, error } when only needs-review findings are available", async () => {
+      const deps = makeDeps({
+        runQuery: vi.fn().mockResolvedValue(
+          makeAudit({
+            rawViolations: undefined,
+            rawFindings: JSON.stringify([
+              {
+                id: "manual-check",
+                dedupKey: "needs-review:.hero:2.4.6",
+                engines: ["htmlcs"],
+                engineRuleIds: { htmlcs: ["manual-check"] },
+                disposition: "needs-review",
+                impact: "moderate",
+                help: "Check heading structure",
+                description: "Needs manual review",
+                wcagCriteria: ["2.4.6"],
+                wcagTags: [],
+                nodes: [{ selector: ".hero" }],
+              },
+            ]),
+            mobileRawViolations: undefined,
+            mobileRawFindings: undefined,
+          }),
+        ),
+      });
+
+      const result = await generateAgentPlanCore(deps, { auditId: "audit-123" });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(result.error).toContain("Only manual-review findings");
+      }
       expect(deps.openaiCreate).not.toHaveBeenCalled();
     });
   });

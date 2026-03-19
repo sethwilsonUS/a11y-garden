@@ -65,29 +65,6 @@ export const createAudit = mutation({
     // Extract domain from normalized URL
     const domain = urlObj.hostname;
 
-    // Check if this user already scanned this URL recently (within 30 minutes)
-    // to prevent accidental double-scans.  Only dedup against the caller's own
-    // audits — returning someone else's audit would cause ownership errors when
-    // the caller later tries to update it.  Anonymous users (no userId) skip
-    // dedup entirely since we can't reliably identify repeat anonymous callers.
-    if (userId) {
-      const thirtyMinutesAgo = Date.now() - 30 * 60 * 1000;
-      const recentAudit = await ctx.db
-        .query("audits")
-        .withIndex("by_url", (q) => q.eq("url", normalizedUrl))
-        .filter((q) =>
-          q.and(
-            q.eq(q.field("userId"), userId),
-            q.gt(q.field("scannedAt"), thirtyMinutesAgo),
-          ),
-        )
-        .first();
-
-      if (recentAudit) {
-        return recentAudit._id;
-      }
-    }
-
     // Create new audit
     const auditId = await ctx.db.insert("audits", {
       url: normalizedUrl,
@@ -211,6 +188,13 @@ export const updateAuditWithResults = mutation({
       minor: v.number(),
       total: v.number(),
     }),
+    reviewViolations: v.object({
+      critical: v.number(),
+      serious: v.number(),
+      moderate: v.number(),
+      minor: v.number(),
+      total: v.number(),
+    }),
     letterGrade: v.union(
       v.literal("A"),
       v.literal("B"),
@@ -220,7 +204,14 @@ export const updateAuditWithResults = mutation({
     ),
     score: v.number(),
     gradingVersion: v.optional(v.number()),
-    rawViolations: v.string(),
+    rawFindings: v.string(),
+    findingsVersion: v.number(),
+    engineProfile: v.union(
+      v.literal("strict"),
+      v.literal("comprehensive"),
+    ),
+    engineSummary: v.string(),
+    rawViolations: v.optional(v.string()),
     status: v.union(
       v.literal("pending"),
       v.literal("scanning"),
@@ -247,7 +238,7 @@ export const updateAuditWithResults = mutation({
     scanDurationMs: v.optional(v.number()),
     // Page title scraped from the site's <title> tag
     pageTitle: v.optional(v.string()),
-    // True when raw violations were trimmed to fit the 500 KB size cap
+    // True when serialized findings were trimmed to fit the audit size budget
     truncated: v.optional(v.boolean()),
     // Screenshot of the scanned page (Convex file storage ID)
     screenshotId: v.optional(v.id("_storage")),
@@ -265,6 +256,15 @@ export const updateAuditWithResults = mutation({
       v.literal("A"), v.literal("B"), v.literal("C"), v.literal("D"), v.literal("F")
     )),
     mobileScore: v.optional(v.number()),
+    mobileReviewViolations: v.optional(v.object({
+      critical: v.number(),
+      serious: v.number(),
+      moderate: v.number(),
+      minor: v.number(),
+      total: v.number(),
+    })),
+    mobileRawFindings: v.optional(v.string()),
+    mobileEngineSummary: v.optional(v.string()),
     mobileRawViolations: v.optional(v.string()),
     mobileScreenshotId: v.optional(v.id("_storage")),
     mobileScanMode: v.optional(v.union(v.literal("full"), v.literal("safe"), v.literal("jsdom-structural"))),
@@ -298,8 +298,8 @@ export const updateAuditWithResults = mutation({
 
       if (
         previous &&
-        previous.rawViolations === args.rawViolations &&
-        (previous.mobileRawViolations ?? null) === (args.mobileRawViolations ?? null)
+        (previous.rawFindings ?? null) === args.rawFindings &&
+        (previous.mobileRawFindings ?? null) === (args.mobileRawFindings ?? null)
       ) {
         const reused: Record<string, unknown> = {};
 

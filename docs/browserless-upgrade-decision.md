@@ -11,6 +11,7 @@ Budget is set to 900 units (`BROWSERLESS_MONTHLY_UNIT_BUDGET=900`) to leave a 10
 | BaaS (Playwright session) | ~1 |
 | BQL stealth (no proxy) | ~1 |
 | BQL with residential proxy | ~1 + ~6/MB transferred |
+| BQL reconnect + comprehensive browser scan | Monitor separately after launch — can add session/runtime overhead on protected sites |
 
 ## Upgrade Triggers
 
@@ -28,7 +29,14 @@ Review monthly when scan stats are available via `convex/scanStats.ts`:
 1. **Auth gate**: Only signed-in users trigger BQL (anonymous users never consume units)
 2. **Circuit breaker**: Disables BQL at 95% monthly budget
 3. **Domain cache**: Known-WAF domains skip BaaS attempt (saves ~1 unit + 5-10s per scan)
-4. **Single viewport**: BQL path runs one scan for both desktop/mobile (halves cost)
+4. **Responsive-site reuse**: BQL often reuses a single bypassed session for both viewports; only adaptive/mobile-specific sites need extra work
+5. **Feature gates**: BQL bypass, comprehensive scans, and AGENTS.md generation are all limited to signed-in users
+
+## Caveat
+
+The in-app Browserless usage tracker is best-effort and in-memory per server
+process. Treat Browserless dashboard numbers as the real source of truth,
+especially on Vercel where multiple instances may be active.
 
 ## Tier Comparison
 

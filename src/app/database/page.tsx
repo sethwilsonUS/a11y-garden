@@ -6,6 +6,7 @@ import { api } from "../../../convex/_generated/api";
 import { AuditCard } from "@/components/AuditCard";
 import { sortAudits, type SortOption } from "@/lib/audit-sort";
 import { track } from "@/lib/analytics";
+import type { EngineProfile } from "@/lib/findings";
 
 function SeedlingIcon({ className }: { className?: string }) {
   return (
@@ -20,6 +21,7 @@ function SeedlingIcon({ className }: { className?: string }) {
 export default function DatabasePage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [sortBy, setSortBy] = useState<SortOption>("date");
+  const [profileFilter, setProfileFilter] = useState<"all" | EngineProfile>("all");
 
   const publicAudits = useQuery(api.audits.getPublicAudits);
 
@@ -35,8 +37,12 @@ export default function DatabasePage() {
         )
       : publicAudits;
 
-    return sortAudits(filtered, sortBy);
-  }, [publicAudits, searchTerm, sortBy]);
+    const profileFiltered = profileFilter === "all"
+      ? filtered
+      : filtered.filter((audit) => audit.engineProfile === profileFilter);
+
+    return sortAudits(profileFiltered, sortBy);
+  }, [publicAudits, searchTerm, sortBy, profileFilter]);
 
   // Debounced Garden Search tracking (no query text — privacy)
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -144,7 +150,20 @@ export default function DatabasePage() {
                 </p>
 
                 {/* Sort Options */}
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <label htmlFor="profile-filter" className="text-sm text-theme-muted">
+                    Profile:
+                  </label>
+                  <select
+                    id="profile-filter"
+                    value={profileFilter}
+                    onChange={(e) => setProfileFilter(e.target.value as "all" | EngineProfile)}
+                    className="px-3 py-2 bg-theme-secondary border border-theme rounded-lg text-sm text-theme-primary focus:ring-2 focus:ring-[var(--accent)] focus:border-transparent transition-all duration-200 cursor-pointer"
+                  >
+                    <option value="all">All</option>
+                    <option value="strict">Strict</option>
+                    <option value="comprehensive">Comprehensive</option>
+                  </select>
                   <label htmlFor="sort-select" className="text-sm text-theme-muted">
                     Sort by:
                   </label>

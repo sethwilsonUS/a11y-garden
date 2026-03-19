@@ -132,6 +132,7 @@ describe("Agent Plan Integration", () => {
       expect(cc.nodeCount).toBe(3); // 2 desktop + 1 mobile
       expect(cc.selectors).toContain(".hero-subtitle");
       expect(cc.selectors).toContain(".mobile-nav-text");
+      expect(cc.viewports).toEqual(["desktop", "mobile"]);
     });
 
     it("sorts by impact (critical first) after grouping", () => {
@@ -151,6 +152,8 @@ describe("Agent Plan Integration", () => {
         url: "https://example.com",
         auditDate: "2026-03-03",
         pageTitle: "Example Site",
+        totalConfirmedFindings: 5,
+        totalGroupedIssues: 4,
       });
 
       // System prompt structure
@@ -171,6 +174,7 @@ describe("Agent Plan Integration", () => {
       expect(userPrompt).toContain("image-alt");
       expect(userPrompt).toContain("link-name");
       expect(userPrompt).toContain("button-name");
+      expect(userPrompt).toContain("Grouped issues included in this prompt: 4 of 4 grouped issues");
 
       // User prompt includes page title
       expect(userPrompt).toContain("Example Site");
@@ -224,6 +228,8 @@ describe("Agent Plan Integration", () => {
         platform: "astro",
         url: "https://mysite.dev",
         auditDate: "2026-01-15",
+        totalConfirmedFindings: 3,
+        totalGroupedIssues: 3,
       });
 
       expect(userPrompt).toContain("Astro");

@@ -2,6 +2,12 @@
 
 > Phase 0 of the Browserless WAF Bypass plan.
 > Run date: 2026-03-03
+>
+> Historical note: this document captures the initial spike before the live
+> Browserless reconnect handoff shipped. The current production path attempts
+> BrowserQL stealth first, then reconnects the solved session back to
+> Playwright for real-browser engine execution when possible, with the older
+> JSDOM structural path kept as fallback.
 
 ## Setup
 
@@ -14,9 +20,10 @@
 
 ## Architecture (discovered during spike)
 
-The original plan assumed BQL → Playwright reconnect via `browserWSEndpoint`.
-This does **not work** — the reconnect returns `browserQLEndpoint` (an HTTP
-endpoint for more BQL queries, not a CDP WebSocket for Playwright).
+At the time of this spike, the original plan assumed BQL → Playwright reconnect
+via `browserWSEndpoint`. In the tested setup, that did **not work** — the
+reconnect returned `browserQLEndpoint` (an HTTP endpoint for more BQL queries,
+not a CDP WebSocket for Playwright).
 
 **Working architecture:**
 1. BQL stealth navigates to URL, bypasses WAF, returns rendered HTML via `html` mutation

@@ -417,7 +417,7 @@ describe("generateMarkdownReport", () => {
         makeReport({ rawViolations: sampleViolations }),
       );
 
-      expect(md).toContain("(`image-alt`) — 1 element\n");
+      expect(md).toContain("(`image-alt`) — 1 affected element\n");
     });
 
     it("shows element count (plural)", () => {
@@ -425,7 +425,36 @@ describe("generateMarkdownReport", () => {
         makeReport({ rawViolations: sampleViolations }),
       );
 
-      expect(md).toContain("(`link-name`) — 2 elements\n");
+      expect(md).toContain("(`link-name`) — 2 affected elements\n");
+    });
+
+    it("uses preserved total node counts when stored examples were trimmed", () => {
+      const rawFindings = JSON.stringify([
+        {
+          id: "image-alt",
+          dedupKey: "confirmed:img:1.1.1",
+          engines: ["axe"],
+          engineRuleIds: { axe: ["image-alt"] },
+          disposition: "confirmed",
+          impact: "critical",
+          help: "Images must have alternate text",
+          description: "Images must have alternate text",
+          helpUrl: "https://dequeuniversity.com/rules/axe/4.10/image-alt",
+          wcagCriteria: ["1.1.1"],
+          wcagTags: ["wcag111"],
+          totalNodes: 25,
+          nodes: [
+            { selector: "img.hero", html: "<img class='hero'>", target: ["img.hero"] },
+            { selector: "img.logo", html: "<img class='logo'>", target: ["img.logo"] },
+          ],
+        },
+      ]);
+
+      const md = generateMarkdownReport(
+        makeReport({ rawFindings }),
+      );
+
+      expect(md).toContain("(`image-alt`) — 25 affected elements\n");
     });
 
     it("omits violations section when rawViolations is undefined", () => {

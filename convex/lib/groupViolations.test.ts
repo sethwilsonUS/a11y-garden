@@ -8,17 +8,23 @@ import { groupViolations } from "./groupViolations";
 function makeViolation(overrides: {
   id: string;
   impact?: "critical" | "serious" | "moderate" | "minor";
+  help?: string;
   description?: string;
   helpUrl?: string;
   tags?: string[];
+  totalNodes?: number;
+  engines?: string[];
   nodes?: Array<{ target: string[]; html: string }>;
 }) {
   return {
     id: overrides.id,
     impact: overrides.impact ?? "moderate",
+    help: overrides.help ?? `Help for ${overrides.id}`,
     description: overrides.description ?? `Description for ${overrides.id}`,
     helpUrl: overrides.helpUrl ?? `https://dequeuniversity.com/rules/${overrides.id}`,
     tags: overrides.tags ?? ["wcag2a", "wcag412"],
+    ...(overrides.totalNodes ? { totalNodes: overrides.totalNodes } : {}),
+    ...(overrides.engines ? { engines: overrides.engines } : {}),
     nodes: overrides.nodes ?? [
       { target: ["#node-1"], html: `<div id="node-1"></div>` },
     ],
@@ -52,6 +58,7 @@ describe("groupViolations", () => {
       expect(colorContrastGroups[0].selectors).toContain(".a");
       expect(colorContrastGroups[0].selectors).toContain(".b");
       expect(colorContrastGroups[0].nodeCount).toBe(2);
+      expect(colorContrastGroups[0].viewports).toEqual(["desktop"]);
     });
   });
 
@@ -80,6 +87,42 @@ describe("groupViolations", () => {
       expect(group.selectors).toContain("img.logo");
       // nodeCount reflects total nodes, not unique selectors
       expect(group.nodeCount).toBe(3);
+    });
+
+    it("preserves total node counts when stored examples were trimmed", () => {
+      const violations = [
+        makeViolation({
+          id: "image-alt",
+          totalNodes: 25,
+          nodes: [
+            { target: ["img.hero"], html: "<img class='hero'>" },
+            { target: ["img.logo"], html: "<img class='logo'>" },
+          ],
+        }),
+      ];
+
+      const result = groupViolations(violations);
+
+      expect(result[0].selectors).toContain("img.hero");
+      expect(result[0].selectors).toContain("img.logo");
+      expect(result[0].nodeCount).toBe(25);
+    });
+
+    it("preserves engine attribution across merged findings", () => {
+      const violations = [
+        makeViolation({
+          id: "color-contrast",
+          engines: ["axe"],
+        }),
+        makeViolation({
+          id: "color-contrast",
+          engines: ["ace", "htmlcs"],
+        }),
+      ];
+
+      const result = groupViolations(violations);
+
+      expect(result[0].engines).toEqual(["axe", "ace", "htmlcs"]);
     });
   });
 
@@ -152,6 +195,7 @@ describe("groupViolations", () => {
       expect(group.helpUrl).toBe(
         "https://dequeuniversity.com/rules/aria-label",
       );
+      expect(group.title).toBe("Help for aria-label");
     });
 
     it("preserves description accurately", () => {
@@ -329,6 +373,7 @@ describe("groupViolations", () => {
       expect(result).toHaveLength(1);
       const group = result[0];
       expect(group).toHaveProperty("ruleId");
+      expect(group).toHaveProperty("title");
       expect(group).toHaveProperty("impact");
       expect(group).toHaveProperty("description");
       expect(group).toHaveProperty("helpUrl");
@@ -336,7 +381,10 @@ describe("groupViolations", () => {
       expect(group).toHaveProperty("selectors");
       expect(group).toHaveProperty("htmlSnippets");
       expect(group).toHaveProperty("nodeCount");
+      expect(group).toHaveProperty("engines");
+      expect(group).toHaveProperty("viewports");
       expect(typeof group.ruleId).toBe("string");
+      expect(typeof group.title).toBe("string");
       expect(typeof group.impact).toBe("string");
       expect(typeof group.description).toBe("string");
       expect(typeof group.helpUrl).toBe("string");
@@ -344,6 +392,8 @@ describe("groupViolations", () => {
       expect(Array.isArray(group.selectors)).toBe(true);
       expect(Array.isArray(group.htmlSnippets)).toBe(true);
       expect(typeof group.nodeCount).toBe("number");
+      expect(Array.isArray(group.engines)).toBe(true);
+      expect(Array.isArray(group.viewports)).toBe(true);
     });
   });
 });

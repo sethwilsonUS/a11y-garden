@@ -2,11 +2,12 @@
  * Agent Plan Prompt Builder
  *
  * Takes GroupedViolation[] + audit metadata and constructs a structured
- * system/user prompt pair for GPT-4.1 Mini to generate an AGENTS.md file.
+ * system/user prompt pair for GPT-5.4 Mini to generate an AGENTS.md file.
  *
  * Pure function — no Convex context or OpenAI calls.
  */
 
+import type { EngineProfile } from "../../src/lib/findings";
 import type { GroupedViolation } from "./groupViolations";
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -25,6 +26,11 @@ const MEDIUM_CONFIDENCE_PLATFORMS = new Set(["react", "vue", "svelte"]);
 
 const MAX_SELECTORS_PER_VIOLATION = 3;
 const MAX_SNIPPETS_PER_VIOLATION = 2;
+const ENGINE_LABELS: Record<string, string> = {
+  axe: "axe-core",
+  ace: "IBM ACE",
+  htmlcs: "HTML_CodeSniffer",
+};
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Types
@@ -36,6 +42,10 @@ export interface PromptInput {
   url: string;
   auditDate: string;
   pageTitle?: string;
+  scanProfile?: EngineProfile;
+  totalConfirmedFindings?: number;
+  totalGroupedIssues?: number;
+  coverageNotes?: string[];
 }
 
 export interface PromptOutput {
@@ -56,18 +66,37 @@ function isMediumConfidence(slug: string): boolean {
   return MEDIUM_CONFIDENCE_PLATFORMS.has(slug);
 }
 
+function formatEngineList(engines: string[]): string {
+  return engines.map((engine) => ENGINE_LABELS[engine] ?? engine).join(", ");
+}
+
+function formatViewportList(
+  viewports: Array<"desktop" | "mobile">,
+): string {
+  if (viewports.length === 2) return "desktop and mobile";
+  return viewports[0] ?? "desktop";
+}
+
 function formatViolation(v: GroupedViolation): string {
   const selectors = v.selectors.slice(0, MAX_SELECTORS_PER_VIOLATION);
   const snippets = v.htmlSnippets
     .slice(0, MAX_SNIPPETS_PER_VIOLATION)
     .map((s) => `\`${s}\``);
 
-  let line = `- **${v.ruleId}** [${v.impact}] (${v.nodeCount} node${v.nodeCount === 1 ? "" : "s"})`;
+  let line = `- **${v.title}** (\`${v.ruleId}\`) [${v.impact}] (${v.nodeCount} affected node${v.nodeCount === 1 ? "" : "s"})`;
   line += `\n  ${v.description}`;
+  if (v.engines.length > 1 || (v.engines.length === 1 && v.engines[0] !== "axe")) {
+    line += `\n  Confirmed by: ${formatEngineList(v.engines)}`;
+  }
+  if (v.viewports.length > 1 || (v.viewports.length === 1 && v.viewports[0] === "mobile")) {
+    line += `\n  Viewports: ${formatViewportList(v.viewports)}`;
+  }
   if (v.wcagTags.length > 0) {
     line += `\n  WCAG: ${v.wcagTags.join(", ")}`;
   }
-  line += `\n  Selectors: ${selectors.join(", ")}`;
+  if (selectors.length > 0) {
+    line += `\n  Selectors: ${selectors.join(", ")}`;
+  }
   if (snippets.length > 0) {
     line += `\n  HTML: ${snippets.join(" | ")}`;
   }
@@ -103,10 +132,21 @@ Example 2 — non-interactive element used as button:
 function buildUserPrompt(input: PromptInput): string {
   const platformName = resolvePlatformName(input.platform);
   const mediumConfidence = isMediumConfidence(input.platform);
+  const totalConfirmedFindings = input.totalConfirmedFindings ?? input.violations.length;
+  const totalGroupedIssues = input.totalGroupedIssues ?? input.violations.length;
+  const confirmedFindingLabel = totalConfirmedFindings === 1 ? "confirmed finding" : "confirmed findings";
+  const groupedIssueLabel = totalGroupedIssues === 1 ? "grouped issue" : "grouped issues";
+  const coverageNotes = [...(input.coverageNotes ?? [])];
 
   const hedgeNote = mediumConfidence
     ? `\n\nNote: The site appears to use ${platformName} based on HTML markers, but detection is not 100% certain. Frame your framework-specific advice accordingly — mention the framework but note the detection may not be accurate.`
     : "";
+
+  if (totalGroupedIssues > input.violations.length) {
+    coverageNotes.unshift(
+      `This prompt includes the top ${input.violations.length} grouped confirmed issues out of ${totalGroupedIssues} total grouped confirmed issues to stay focused.`,
+    );
+  }
 
   const pageInfo = input.pageTitle
     ? `Page: "${input.pageTitle}" at ${input.url}`
@@ -133,15 +173,22 @@ function buildUserPrompt(input: PromptInput): string {
   }
 
   const violationBlock = sections.join("\n\n");
+  const profileLine = input.scanProfile
+    ? `Scan profile: ${input.scanProfile === "comprehensive" ? "Comprehensive" : "Strict"}\n`
+    : "";
+  const coverageSection = coverageNotes.length > 0
+    ? `\n## Coverage Notes\n\n${coverageNotes.map((note) => `- ${note}`).join("\n")}\n`
+    : "";
 
   return `Generate an AGENTS.md file for the following accessibility audit.
 
 Framework: ${platformName}
 ${pageInfo}
 Audit date: ${input.auditDate}
-Total violations: ${input.violations.length}${hedgeNote}
+${profileLine}Confirmed findings available: ${totalConfirmedFindings} ${confirmedFindingLabel}
+Grouped issues included in this prompt: ${input.violations.length} of ${totalGroupedIssues} ${groupedIssueLabel}${hedgeNote}${coverageSection}
 
-## Violations
+## Confirmed Issues
 
 ${violationBlock}
 
@@ -149,6 +196,8 @@ ${violationBlock}
 
 - Generate ${platformName}-specific code examples where relevant.
 - Selectors reference the rendered DOM. Instruct the agent to search the codebase for the source components that produce these selectors.
+- Treat issues confirmed by multiple engines as especially trustworthy.
+- If an issue is mobile-only or spans both viewports, preserve the unaffected viewport while fixing it.
 - Use imperative verbs: "Find the component…", "Add aria-label…", "Replace div with button…".
 - Do NOT suggest installing new dependencies unless absolutely necessary.
 - Group fixes by severity section (Critical Fixes, Serious Fixes, Moderate Fixes, Minor Fixes).

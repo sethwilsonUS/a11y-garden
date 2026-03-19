@@ -68,7 +68,7 @@ Key directories to understand:
 Here are some areas where contributions are particularly welcome:
 
 - **Accessibility improvements** — We should practice what we preach!
-- **Additional WCAG rules** — Expanding axe-core rule coverage
+- **Additional engine coverage** — Improving cross-engine normalization, deduplication, and rule coverage
 - **Internationalization** — Adding support for multiple languages
 - **Performance** — Faster scans, better caching
 - **Documentation** — Tutorials, examples, improved explanations

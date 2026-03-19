@@ -7,6 +7,11 @@
 
 import OpenAI from "openai";
 import { PLATFORM_LABELS, getPlatformConfidence } from "./platforms";
+import {
+  getFindingNodeCount,
+  parseSerializedFindings,
+  splitFindingsByDisposition,
+} from "./findings";
 
 export interface AISummaryResult {
   summary: string;
@@ -17,7 +22,12 @@ export interface AISummaryResult {
 }
 
 /** Default model used by the CLI and production Convex action */
-export const DEFAULT_AI_MODEL = "gpt-4.1-mini";
+export const DEFAULT_AI_MODEL = "gpt-5.4-mini";
+export const DEFAULT_AI_MODEL_LABEL = "GPT-5.4 Mini";
+export const POSITIVE_AUTOMATION_SUMMARY =
+  "Excellent! This page passed all automated accessibility checks. While automated testing can't catch every accessibility issue, this is a great foundation. Consider manual testing with assistive technologies for comprehensive coverage.";
+export const REVIEW_ONLY_SUMMARY =
+  "This scan did not produce any confirmed automated accessibility violations, but it did surface lower-confidence items that should be manually reviewed. Treat these as prompts for a closer human check rather than confirmed defects.";
 
 export interface ModelOption {
   id: string;
@@ -36,16 +46,23 @@ export interface ModelOption {
  * exposes these in a dropdown so developers can compare output quality
  * across different OpenAI models.
  *
- * Pricing sourced from platform.openai.com/docs/models (Feb 2026).
+ * Pricing sourced from developers.openai.com/api/docs/models (Mar 2026).
  */
 export const AVAILABLE_MODELS: ModelOption[] = [
-  { id: "gpt-4o-mini",  label: "GPT-4o Mini",  description: "Fast & cheap",            inputPrice: 0.15,  outputPrice: 0.60  },
-  { id: "gpt-4.1-mini", label: "GPT-4.1 Mini",  description: "Default",                inputPrice: 0.40,  outputPrice: 1.60  },
-  { id: "o3-mini",      label: "o3-mini",        description: "Reasoning model",        inputPrice: 1.10,  outputPrice: 4.40  },
-  { id: "gpt-5",        label: "GPT-5",          description: "Flagship",               inputPrice: 1.25,  outputPrice: 10.00 },
-  { id: "gpt-4.1",      label: "GPT-4.1",       description: "Strong all-rounder",     inputPrice: 2.00,  outputPrice: 8.00  },
-  { id: "gpt-4o",       label: "GPT-4o",        description: "Multimodal",              inputPrice: 2.50,  outputPrice: 10.00 },
+  { id: "gpt-4o-mini",  label: "GPT-4o Mini",   description: "Legacy budget baseline", inputPrice: 0.15,  outputPrice: 0.60  },
+  { id: "gpt-5.4-nano", label: "GPT-5.4 Nano",  description: "Fastest GPT-5.4 option", inputPrice: 0.20,  outputPrice: 1.25  },
+  { id: "gpt-5-mini",   label: "GPT-5 Mini",    description: "Low-cost reasoning",      inputPrice: 0.25,  outputPrice: 2.00  },
+  { id: "gpt-5.4-mini", label: "GPT-5.4 Mini",  description: "Default",                 inputPrice: 0.75,  outputPrice: 3.00  },
+  { id: "gpt-5.4",      label: "GPT-5.4",       description: "Flagship",                inputPrice: 2.50,  outputPrice: 15.00 },
 ];
+
+export function getModelLabel(modelId?: string | null): string {
+  if (!modelId) {
+    return DEFAULT_AI_MODEL_LABEL;
+  }
+
+  return AVAILABLE_MODELS.find((model) => model.id === modelId)?.label ?? modelId;
+}
 
 /**
  * Format a model's pricing for display (e.g. "$0.15 in / $0.60 out").
@@ -57,21 +74,22 @@ export function formatModelPrice(model: ModelOption): string {
 }
 
 /**
- * Generate an AI summary and top issues list from raw axe-core violations.
+ * Generate an AI summary and top issues list from normalized accessibility findings.
  *
  * Uses OpenAI with the same prompt as the Convex action.
  * Requires OPENAI_API_KEY to be set in the environment.
  *
- * @param rawViolations - JSON string of axe-core violations
- * @param model - OpenAI model ID to use (defaults to gpt-4.1-mini)
+ * @param rawFindings - JSON string of normalized findings
+ * @param model - OpenAI model ID to use (defaults to gpt-5.4-mini)
  * @param platform - Optional detected platform slug (e.g. "wordpress")
  * @returns AI-generated summary, top issues, and which model was used
  */
 export async function generateAISummary(
-  rawViolations: string,
+  rawFindings: string,
   model: string = DEFAULT_AI_MODEL,
   platform?: string,
   viewport: "desktop" | "mobile" = "desktop",
+  rawViolations?: string,
 ): Promise<AISummaryResult> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
@@ -81,21 +99,40 @@ export async function generateAISummary(
   }
 
   const openai = new OpenAI({ apiKey });
-
-  const violations = JSON.parse(rawViolations);
+  const findings = parseSerializedFindings(rawFindings, rawViolations);
+  const { confirmed, review } = splitFindingsByDisposition(findings);
 
   // If no violations, return a positive summary
-  if (violations.length === 0) {
+  if (confirmed.length === 0 && review.length === 0) {
     return {
-      summary:
-        "Excellent! This page passed all automated accessibility checks. While automated testing can't catch every accessibility issue, this is a great foundation. Consider manual testing with assistive technologies for comprehensive coverage.",
+      summary: POSITIVE_AUTOMATION_SUMMARY,
       topIssues: [],
       model,
     };
   }
 
+  if (confirmed.length === 0) {
+    return {
+      summary: REVIEW_ONLY_SUMMARY,
+      topIssues: [],
+      model,
+    };
+  }
+
+  const aiInput = confirmed.slice(0, 10).map((finding) => ({
+    id: finding.id,
+    title: finding.help,
+    impact: finding.impact,
+    description: finding.description,
+    engines: finding.engines,
+    wcagCriteria: finding.wcagCriteria,
+    wcagTags: finding.wcagTags,
+    nodeCount: getFindingNodeCount(finding),
+    selectors: finding.nodes.slice(0, 3).map((node) => node.selector),
+  }));
+
   // Same prompts as convex/ai.ts — kept in sync manually
-  const systemPrompt = `You are an accessibility expert translating technical WCAG violations into plain English for web developers and site owners. Focus on user impact and actionable fixes. Be concise and helpful.`;
+  const systemPrompt = `You are an accessibility expert translating technical accessibility findings into plain English for web developers and site owners. Focus on user impact and actionable fixes. Be concise and helpful.`;
 
   // Platform-specific context for more actionable advice
   const platformName = platform ? (PLATFORM_LABELS[platform] ?? platform) : null;
@@ -123,8 +160,8 @@ Analyze these accessibility violations and provide:
 2. The most important issues to address, as a JSON array called "topIssues". Each entry should be a brief, one-line description with user impact. Include between 1 and 5 issues — use your judgment based on the number and diversity of violations. If there is only one distinct problem, return just one issue. If there are many different problems, return up to 5. Never repeat the same issue in different words.${platformInstruction}
 ${viewportContext}
 
-Violations:
-${JSON.stringify(violations.slice(0, 10), null, 2)}
+Confirmed findings:
+${JSON.stringify(aiInput, null, 2)}
 
 Format your response as JSON:
 {
@@ -159,9 +196,12 @@ Format your response as JSON:
     typeof response.platformTip === "string" && response.platformTip.trim()
       ? response.platformTip.trim()
       : undefined;
+  const reviewNote = review.length > 0
+    ? ` Manual review is also recommended for ${review.length} lower-confidence item${review.length === 1 ? "" : "s"}.`
+    : "";
 
   return {
-    summary: response.summary || "Analysis complete.",
+    summary: `${response.summary || "Analysis complete."}${reviewNote}`.trim(),
     topIssues,
     model,
     ...(platformTip ? { platformTip } : {}),

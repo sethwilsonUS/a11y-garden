@@ -1,22 +1,28 @@
 /**
- * BQL + JSDOM strategy for WAF-bypassed scans.
+ * BQL strategy for WAF-bypassed scans.
  *
  * Architecture:
  *   1. BQL stealth navigates to the URL and bypasses the WAF
- *   2. BQL returns the fully-rendered HTML
- *   3. axe-core runs server-side against the HTML via JSDOM
+ *   2. Comprehensive scans try reconnecting to the live browser and running
+ *      the in-page engines directly in Playwright
+ *   3. If live handoff fails, fall back to a structural JSDOM scan
  *
  * Trade-off: JSDOM doesn't compute CSS, so rules like color-contrast won't
  * fire. For WAF-blocked sites, structural results >> zero results.
  *
- * The BQL path uses single viewport only — JSDOM has no renderer, so
- * "desktop" vs "mobile" viewport is meaningless. When called for mobile
- * viewport, returns cached desktop results.
+ * The BQL path runs against server-rendered HTML, so viewport differences are
+ * usually limited. When adaptive serving signals are present, we attempt a
+ * second mobile-specific fetch; otherwise mobile reuses the cached desktop
+ * findings with the captured mobile screenshot when available.
  */
 
-import { ScanBlockedError } from "@/lib/scanner";
+import { chromium, type Browser, type Page } from "playwright";
+import {
+  MOBILE_CONFIG,
+  ScanBlockedError,
+} from "@/lib/scanner";
 import { detectPlatformFromHtml } from "@/lib/platforms";
-import { runAxeOnHtml } from "../axe-jsdom";
+import { runEnginesOnHtml, runEnginesOnPage } from "../engines/orchestrator";
 import { STRUCTURAL_RULES, JSDOM_SKIPPED_CATEGORIES } from "../rules/categories";
 import { checkBqlNavigation } from "../utils/waf-detector";
 import { detectAdaptiveServing } from "../utils/adaptive-detect";
@@ -42,6 +48,7 @@ interface BqlNavigateResult {
   httpStatus: number | null;
   screenshotBase64: string | null;
   mobileScreenshotBase64: string | null;
+  browserWSEndpoint?: string;
 }
 
 type PostGotoStrategy = "immediate" | "wait-nav" | "wait-nav-long";
@@ -93,6 +100,7 @@ async function callBql(
   cloudUrl: string,
   opts: { proxy: boolean; humanlike: boolean; timeoutMs?: number },
 ): Promise<BqlResponse> {
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_BQL_TIMEOUT_MS;
   const params = new URLSearchParams({ token });
   if (opts.proxy) {
     params.set("proxy", "residential");
@@ -101,9 +109,9 @@ async function callBql(
   if (opts.humanlike) {
     params.set("humanlike", "true");
   }
+  params.set("timeout", String(timeoutMs));
 
   const endpoint = `${cloudUrl}/stealth/bql?${params}`;
-  const timeoutMs = opts.timeoutMs ?? DEFAULT_BQL_TIMEOUT_MS;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     const res = await fetch(endpoint, {
@@ -143,6 +151,7 @@ async function callBql(
 interface BqlQueryOptions {
   screenshot?: boolean;
   mobileDevice?: string;
+  reconnectTimeoutMs?: number;
 }
 
 const DESKTOP_VP = { width: 1920, height: 1080 };
@@ -182,6 +191,9 @@ function buildBqlQuery(
   const singleScreenshotLine = queryOpts.screenshot && isMobileDevice
     ? '\n  screenshot(fullPage: false, type: jpeg, quality: 90) { base64 }'
     : '';
+  const reconnectLine = queryOpts.reconnectTimeoutMs
+    ? `\n  reconnect(timeout: ${queryOpts.reconnectTimeoutMs}) { browserWSEndpoint }`
+    : "";
 
   // Use ~40% of the step's time budget for the navigation wait, clamped to [8s, 20s]
   const navWaitMs = Math.max(8_000, Math.min(20_000, Math.floor(stepTimeoutMs * 0.4)));
@@ -192,7 +204,7 @@ function buildBqlQuery(
     return `mutation GetHtml {${preNav}
   goto(url: "${targetUrl}", waitUntil: load) { status time }
   waitForNavigation(timeout: ${navWaitMs}, waitUntil: networkIdle) { time }${desktopScreenshotLine}
-  html { html }${mobileScreenshotLine}${singleScreenshotLine}
+  html { html }${mobileScreenshotLine}${singleScreenshotLine}${reconnectLine}
 }`;
   }
 
@@ -200,7 +212,7 @@ function buildBqlQuery(
     return `mutation GetHtml {${preNav}
   goto(url: "${targetUrl}", waitUntil: load) { status time }
   waitForNavigation(timeout: ${longWaitMs}, waitUntil: networkIdle) { time }${desktopScreenshotLine}
-  html { html }${mobileScreenshotLine}${singleScreenshotLine}
+  html { html }${mobileScreenshotLine}${singleScreenshotLine}${reconnectLine}
 }`;
   }
 
@@ -208,13 +220,13 @@ function buildBqlQuery(
     return `mutation GetHtml {${preNav}
   goto(url: "${targetUrl}", waitUntil: domContentLoaded) { status time }
   verify(type: cloudflare) { found solved time }${desktopScreenshotLine}
-  html { html }${mobileScreenshotLine}${singleScreenshotLine}
+  html { html }${mobileScreenshotLine}${singleScreenshotLine}${reconnectLine}
 }`;
   }
 
   return `mutation GetHtml {${preNav}
   goto(url: "${targetUrl}", waitUntil: domContentLoaded) { status time }${desktopScreenshotLine}
-  html { html }${mobileScreenshotLine}${singleScreenshotLine}
+  html { html }${mobileScreenshotLine}${singleScreenshotLine}${reconnectLine}
 }`;
 }
 
@@ -261,6 +273,7 @@ async function bqlGetHtml(
   const desktopShot = d?.desktopScreenshot as { base64?: string } | undefined;
   const mobileShot = d?.mobileScreenshot as { base64?: string } | undefined;
   const singleShot = d?.screenshot as { base64?: string } | undefined;
+  const reconnect = d?.reconnect as { browserWSEndpoint?: string } | undefined;
 
   const titleMatch = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
   const pageTitle = titleMatch?.[1]?.trim() ?? "";
@@ -282,6 +295,9 @@ async function bqlGetHtml(
     httpStatus: (gotoResult?.status as number) ?? null,
     screenshotBase64: desktopShot?.base64 ?? singleShot?.base64 ?? null,
     mobileScreenshotBase64: mobileShot?.base64 ?? null,
+    ...(reconnect?.browserWSEndpoint
+      ? { browserWSEndpoint: reconnect.browserWSEndpoint }
+      : {}),
   };
 }
 
@@ -303,6 +319,53 @@ function buildJsdomScanMode(rulesRun: number): ScanModeInfo {
   };
 }
 
+function combineWarnings(
+  base: string | undefined,
+  extra: string | undefined,
+): string {
+  return [base, extra].filter(Boolean).join(" ");
+}
+
+function withBrowserlessToken(
+  endpoint: string,
+  token: string,
+): string {
+  try {
+    const url = new URL(endpoint);
+    if (!url.searchParams.has("token")) {
+      url.searchParams.set("token", token);
+    }
+    return url.toString();
+  } catch {
+    const encodedToken = encodeURIComponent(token);
+    if (endpoint.includes("token=")) {
+      return endpoint;
+    }
+    return endpoint.includes("?")
+      ? `${endpoint}&token=${encodedToken}`
+      : `${endpoint}?token=${encodedToken}`;
+  }
+}
+
+async function settlePage(page: Page): Promise<void> {
+  await page.waitForLoadState("load", { timeout: 15_000 }).catch(() => {});
+  await page.waitForTimeout(3_000);
+}
+
+async function captureViewportScreenshot(
+  page: Page,
+): Promise<Buffer | undefined> {
+  try {
+    return await page.screenshot({
+      type: "jpeg",
+      quality: 75,
+      fullPage: false,
+    });
+  } catch {
+    return undefined;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Strategy implementation
 // ---------------------------------------------------------------------------
@@ -318,6 +381,7 @@ export class BqlJsdomStrategy implements ScanStrategy {
     url: string;
     html: string;
     result: StrategyScanResult;
+    mobileResult?: StrategyScanResult;
     mobileScreenshot?: Buffer;
   } | null = null;
 
@@ -343,17 +407,119 @@ export class BqlJsdomStrategy implements ScanStrategy {
       return this.handleMobileViewport(url, opts);
     }
 
+    if (opts.engineProfile === "comprehensive") {
+      return this.scanComprehensive(url, opts);
+    }
+
+    return this.scanStructural(url, opts);
+  }
+
+  private async scanComprehensive(
+    url: string,
+    opts: ScanStrategyOptions,
+  ): Promise<StrategyScanResult> {
+    const liveFetch = await this.fetchHtml(
+      url,
+      opts.timeBudgetMs,
+      { reconnectTimeoutMs: 30_000 },
+      opts.onProgress,
+    );
+
+    if (!liveFetch.browserWSEndpoint) {
+      console.warn(
+        `[BQL] No reconnect endpoint returned for ${url}. Falling back to structural scan.`,
+      );
+      return this.scanStructural(
+        url,
+        opts,
+        liveFetch,
+        "Browserless did not return a live reconnect session, so HTMLCS and ACE fell back to structural mode.",
+      );
+    }
+
+    opts.onProgress?.("waf:Bypass complete — attaching live browser...");
+
+    try {
+      const reconnectEndpoint = withBrowserlessToken(
+        liveFetch.browserWSEndpoint,
+        this.token,
+      );
+
+      if (reconnectEndpoint !== liveFetch.browserWSEndpoint) {
+        console.warn(
+          `[BQL] Reconnect endpoint for ${url} did not include a token. Injecting API token before Playwright handoff.`,
+        );
+      }
+
+      const browser = await chromium.connectOverCDP(reconnectEndpoint);
+      try {
+        const page = await this.findConnectedPage(browser, url);
+        await settlePage(page);
+
+        opts.onProgress?.("waf:Running live browser scan...");
+        const desktopResult = await this.buildLiveResult(
+          page,
+          opts,
+          liveFetch.pageTitle,
+          liveFetch.content,
+        );
+
+        const mobileResult = await this.scanLiveMobile(
+          page,
+          url,
+          opts,
+          desktopResult,
+        );
+
+        this.desktopCache = {
+          url,
+          html: liveFetch.content,
+          result: desktopResult,
+          mobileResult,
+          mobileScreenshot: mobileResult.screenshot,
+        };
+
+        return opts.viewport === "mobile" ? mobileResult : desktopResult;
+      } finally {
+        await browser.close();
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(
+        `[BQL] Live browser handoff failed for ${url}: ${message}. Falling back to structural scan.`,
+      );
+      return this.scanStructural(
+        url,
+        opts,
+        liveFetch,
+        "Browserless live-browser handoff failed after bypass, so HTMLCS and ACE fell back to structural mode.",
+      );
+    }
+  }
+
+  private async scanStructural(
+    url: string,
+    opts: ScanStrategyOptions,
+    preloadedFetch?: Awaited<ReturnType<BqlJsdomStrategy["fetchHtml"]>>,
+    fallbackWarning?: string,
+  ): Promise<StrategyScanResult> {
     const scanStart = Date.now();
-    const fetchResult = await this.fetchHtml(url, opts.timeBudgetMs, {
-      screenshot: opts.captureScreenshot,
-    }, opts.onProgress);
+    const fetchResult = preloadedFetch ?? await this.fetchHtml(
+      url,
+      opts.timeBudgetMs,
+      {
+        screenshot: opts.captureScreenshot,
+      },
+      opts.onProgress,
+    );
 
     // Retry if any screenshot is missing. BQL sometimes returns mobile but
     // not desktop (or vice versa) due to timing/render races.
     const needDesktop = opts.captureScreenshot && !fetchResult.screenshotBase64;
     const needMobile = opts.captureScreenshot && !fetchResult.mobileScreenshotBase64;
+    const canRetryScreenshots = !preloadedFetch;
 
-    if (needDesktop || needMobile) {
+    if (canRetryScreenshots && (needDesktop || needMobile)) {
       const elapsed = Date.now() - scanStart;
       const remaining = opts.timeBudgetMs - elapsed;
       const missing = [needDesktop && "desktop", needMobile && "mobile"].filter(Boolean).join("+");
@@ -373,9 +539,10 @@ export class BqlJsdomStrategy implements ScanStrategy {
       }
     }
 
-    const axeResult = await runAxeOnHtml(
+    const auditResult = await runEnginesOnHtml(
       fetchResult.content,
       url,
+      opts.engineProfile,
       STRUCTURAL_RULES,
     );
 
@@ -395,23 +562,178 @@ export class BqlJsdomStrategy implements ScanStrategy {
         : undefined;
 
     const result: StrategyScanResult = {
-      violations: axeResult.violations,
-      rawViolations: axeResult.rawViolations,
-      truncated: axeResult.truncated,
-      scanMode: buildJsdomScanMode(axeResult.rulesRun),
+      violations: auditResult.violations,
+      reviewViolations: auditResult.reviewViolations,
+      rawFindings: auditResult.rawFindings,
+      findingsVersion: auditResult.findingsVersion,
+      engineProfile: auditResult.engineProfile,
+      engineSummary: auditResult.engineSummary,
+      truncated: auditResult.truncated,
+      scanMode: buildJsdomScanMode(auditResult.scanModeInfo.rulesRun),
       pageTitle: fetchResult.pageTitle,
       screenshot,
       screenshotWarning,
       platform,
-      warning:
-        axeResult.violations.total === 0 && fetchResult.content.length < 10_000
+      warning: combineWarnings(
+        fallbackWarning,
+        auditResult.violations.total === 0 && fetchResult.content.length < 10_000
           ? "Limited results — this site may render content via JavaScript. " +
             "The server-side scan could only check the page skeleton."
           : undefined,
+      ),
     };
 
-    this.desktopCache = { url, html: fetchResult.content, result, mobileScreenshot };
+    this.desktopCache = {
+      url,
+      html: fetchResult.content,
+      result,
+      mobileScreenshot,
+    };
     return result;
+  }
+
+  private async findConnectedPage(
+    browser: Browser,
+    url: string,
+  ): Promise<Page> {
+    const hostname = (() => {
+      try {
+        return new URL(url).hostname;
+      } catch {
+        return undefined;
+      }
+    })();
+
+    const pages = browser.contexts().flatMap((context) => context.pages());
+    const match = pages.find((page) => page.url().includes(url))
+      ?? (hostname
+        ? pages.find((page) => page.url().includes(hostname))
+        : undefined)
+      ?? pages.find((page) => page.url() !== "about:blank")
+      ?? pages[0];
+
+    if (!match) {
+      throw new Error(`Could not find a live Browserless page matching ${url}`);
+    }
+
+    return match;
+  }
+
+  private async buildLiveResult(
+    page: Page,
+    opts: ScanStrategyOptions,
+    fallbackPageTitle?: string,
+    existingHtml?: string,
+  ): Promise<StrategyScanResult> {
+    const [auditResult, pageTitle, html, screenshot] = await Promise.all([
+      runEnginesOnPage(page, opts.engineProfile),
+      page.title().catch(() => fallbackPageTitle ?? ""),
+      existingHtml
+        ? Promise.resolve(existingHtml)
+        : page.content().catch(() => ""),
+      opts.captureScreenshot
+        ? captureViewportScreenshot(page)
+        : Promise.resolve(undefined),
+    ]);
+
+    const platform = html ? detectPlatformFromHtml(html) : undefined;
+
+    return {
+      violations: auditResult.violations,
+      reviewViolations: auditResult.reviewViolations,
+      rawFindings: auditResult.rawFindings,
+      findingsVersion: auditResult.findingsVersion,
+      engineProfile: auditResult.engineProfile,
+      engineSummary: auditResult.engineSummary,
+      truncated: auditResult.truncated,
+      scanMode: auditResult.scanModeInfo,
+      ...(pageTitle ? { pageTitle } : {}),
+      ...(screenshot ? { screenshot } : {}),
+      ...(platform ? { platform } : {}),
+      ...(auditResult.warning ? { warning: auditResult.warning } : {}),
+    };
+  }
+
+  private async scanLiveMobile(
+    page: Page,
+    url: string,
+    opts: ScanStrategyOptions,
+    desktopResult: StrategyScanResult,
+  ): Promise<StrategyScanResult> {
+    try {
+      opts.onProgress?.("waf:Preparing mobile viewport in reused browser...");
+      await this.emulateMobileViewport(page);
+
+      const response = await page.goto(url, {
+        waitUntil: "domcontentloaded",
+        timeout: 30_000,
+      });
+      await settlePage(page);
+
+      const [pageTitle, html] = await Promise.all([
+        page.title().catch(() => desktopResult.pageTitle ?? ""),
+        page.content().catch(() => ""),
+      ]);
+
+      const wafCheck = checkBqlNavigation(
+        html,
+        pageTitle,
+        response?.status() ?? 200,
+      );
+
+      if (wafCheck) {
+        throw new ScanBlockedError(
+          "Mobile live scan hit a firewall challenge after bypass.",
+          pageTitle,
+          response?.status() ?? 403,
+        );
+      }
+
+      return this.buildLiveResult(page, opts, pageTitle, html);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(
+        `[BQL] Live mobile scan failed for ${url}: ${message}. Falling back to desktop findings.`,
+      );
+
+      return {
+        ...desktopResult,
+        screenshot: undefined,
+        warning: combineWarnings(
+          desktopResult.warning,
+          "Mobile live scan failed after firewall bypass. Using desktop findings instead.",
+        ),
+      };
+    }
+  }
+
+  private async emulateMobileViewport(
+    page: Page,
+  ): Promise<void> {
+    await page.context().setExtraHTTPHeaders({ ...MOBILE_CONFIG.extraHTTPHeaders });
+    await page.setViewportSize(MOBILE_CONFIG.viewport);
+
+    const client = await page.context().newCDPSession(page);
+    await client.send("Network.setUserAgentOverride", {
+      userAgent: MOBILE_CONFIG.userAgent,
+      acceptLanguage: "en-US,en;q=0.9",
+      platform: "iPhone",
+    }).catch(() => {});
+    await client.send("Emulation.setDeviceMetricsOverride", {
+      width: MOBILE_CONFIG.viewport.width,
+      height: MOBILE_CONFIG.viewport.height,
+      deviceScaleFactor: MOBILE_CONFIG.deviceScaleFactor,
+      mobile: true,
+      screenWidth: MOBILE_CONFIG.viewport.width,
+      screenHeight: MOBILE_CONFIG.viewport.height,
+      positionX: 0,
+      positionY: 0,
+      screenOrientation: { angle: 0, type: "portraitPrimary" },
+    }).catch(() => {});
+    await client.send("Emulation.setTouchEmulationEnabled", {
+      enabled: true,
+      maxTouchPoints: 5,
+    }).catch(() => {});
   }
 
   private async handleMobileViewport(
@@ -419,15 +741,22 @@ export class BqlJsdomStrategy implements ScanStrategy {
     opts: ScanStrategyOptions,
   ): Promise<StrategyScanResult> {
     const cached = this.desktopCache!;
+
+    if (cached.mobileResult) {
+      return cached.mobileResult;
+    }
+
     const adaptive = detectAdaptiveServing(cached.html, url);
 
     if (!adaptive.detected) {
       return {
         ...cached.result,
         screenshot: cached.mobileScreenshot,
-        warning:
+        warning: combineWarnings(
+          cached.result.warning,
           "Same as desktop — this site uses responsive design (same HTML for all viewports). " +
-          "CSS-only layout differences not evaluated in server-side mode.",
+            "CSS-only layout differences not evaluated in server-side mode.",
+        ),
       };
     }
 
@@ -436,36 +765,60 @@ export class BqlJsdomStrategy implements ScanStrategy {
       return {
         ...cached.result,
         screenshot: cached.mobileScreenshot,
-        warning:
+        warning: combineWarnings(
+          cached.result.warning,
           `Adaptive serving detected (${adaptive.reason}) but insufficient time for mobile scan. ` +
-          "Using desktop results.",
+            "Using desktop results.",
+        ),
       };
     }
 
-    const mobileFetch = await this.fetchHtml(url, remaining, {
-      screenshot: opts.captureScreenshot,
-      mobileDevice: "iPhone 14",
-    });
+    try {
+      const mobileFetch = await this.fetchHtml(url, remaining, {
+        screenshot: opts.captureScreenshot,
+        mobileDevice: "iPhone 14",
+      });
 
-    const axeResult = await runAxeOnHtml(
-      mobileFetch.content,
-      url,
-      STRUCTURAL_RULES,
-    );
+      const auditResult = await runEnginesOnHtml(
+        mobileFetch.content,
+        url,
+        opts.engineProfile,
+        STRUCTURAL_RULES,
+      );
 
-    const mobileScreenshot = mobileFetch.screenshotBase64
-      ? Buffer.from(mobileFetch.screenshotBase64, "base64")
-      : undefined;
+      const mobileScreenshot = mobileFetch.screenshotBase64
+        ? Buffer.from(mobileFetch.screenshotBase64, "base64")
+        : undefined;
 
-    return {
-      violations: axeResult.violations,
-      rawViolations: axeResult.rawViolations,
-      truncated: axeResult.truncated,
-      scanMode: buildJsdomScanMode(axeResult.rulesRun),
-      pageTitle: mobileFetch.pageTitle,
-      screenshot: mobileScreenshot,
-      warning: `Mobile-specific scan — ${adaptive.reason}`,
-    };
+      return {
+        violations: auditResult.violations,
+        reviewViolations: auditResult.reviewViolations,
+        rawFindings: auditResult.rawFindings,
+        findingsVersion: auditResult.findingsVersion,
+        engineProfile: auditResult.engineProfile,
+        engineSummary: auditResult.engineSummary,
+        truncated: auditResult.truncated,
+        scanMode: buildJsdomScanMode(auditResult.scanModeInfo.rulesRun),
+        pageTitle: mobileFetch.pageTitle,
+        screenshot: mobileScreenshot,
+        warning: `Mobile-specific scan — ${adaptive.reason}`,
+      };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.warn(
+        `[BQL] Adaptive mobile fetch failed for ${url}: ${message}. Falling back to cached desktop findings.`,
+      );
+
+      return {
+        ...cached.result,
+        screenshot: cached.mobileScreenshot,
+        warning: combineWarnings(
+          cached.result.warning,
+          `Adaptive serving detected (${adaptive.reason}) but the mobile follow-up scan failed. ` +
+            "Using desktop findings instead.",
+        ),
+      };
+    }
   }
 
   /**
@@ -478,7 +831,13 @@ export class BqlJsdomStrategy implements ScanStrategy {
     timeBudgetMs: number,
     queryOpts: BqlQueryOptions = {},
     onProgress?: (message: string) => void,
-  ): Promise<{ content: string; pageTitle: string; screenshotBase64: string | null; mobileScreenshotBase64: string | null }> {
+  ): Promise<{
+    content: string;
+    pageTitle: string;
+    screenshotBase64: string | null;
+    mobileScreenshotBase64: string | null;
+    browserWSEndpoint?: string;
+  }> {
     const deadline = Date.now() + timeBudgetMs;
 
     for (let i = 0; i < ESCALATION_CHAIN.length; i++) {
@@ -541,6 +900,9 @@ export class BqlJsdomStrategy implements ScanStrategy {
           pageTitle: nav.pageTitle,
           screenshotBase64: nav.screenshotBase64,
           mobileScreenshotBase64: nav.mobileScreenshotBase64,
+          ...(nav.browserWSEndpoint
+            ? { browserWSEndpoint: nav.browserWSEndpoint }
+            : {}),
         };
       } catch (err) {
         if (err instanceof ScanBlockedError) throw err;

@@ -237,7 +237,11 @@ describe("ScanResult type contract", () => {
   it("allows ScanResult without screenshot (backwards-compatible)", () => {
     const result: ScanResult = {
       violations: { critical: 0, serious: 0, moderate: 0, minor: 0, total: 0 },
-      rawViolations: "[]",
+      reviewViolations: { critical: 0, serious: 0, moderate: 0, minor: 0, total: 0 },
+      rawFindings: "[]",
+      findingsVersion: 2,
+      engineProfile: "strict",
+      engineSummary: { selectedEngines: ["axe"], engines: [] },
       pageTitle: "Test",
       safeMode: false,
       truncated: false,
@@ -250,7 +254,11 @@ describe("ScanResult type contract", () => {
     const fakeScreenshot = Buffer.from("fake-jpeg-data");
     const result: ScanResult = {
       violations: { critical: 1, serious: 0, moderate: 0, minor: 0, total: 1 },
-      rawViolations: "[]",
+      reviewViolations: { critical: 0, serious: 0, moderate: 0, minor: 0, total: 0 },
+      rawFindings: "[]",
+      findingsVersion: 2,
+      engineProfile: "strict",
+      engineSummary: { selectedEngines: ["axe"], engines: [] },
       pageTitle: "Test",
       safeMode: false,
       truncated: false,
@@ -366,7 +374,11 @@ describe("ScanResult platform field", () => {
   it("allows ScanResult without platform (backwards-compatible)", () => {
     const result: ScanResult = {
       violations: { critical: 0, serious: 0, moderate: 0, minor: 0, total: 0 },
-      rawViolations: "[]",
+      reviewViolations: { critical: 0, serious: 0, moderate: 0, minor: 0, total: 0 },
+      rawFindings: "[]",
+      findingsVersion: 2,
+      engineProfile: "strict",
+      engineSummary: { selectedEngines: ["axe"], engines: [] },
       pageTitle: "Test",
       safeMode: false,
       truncated: false,
@@ -378,7 +390,11 @@ describe("ScanResult platform field", () => {
   it("allows ScanResult with platform string", () => {
     const result: ScanResult = {
       violations: { critical: 0, serious: 0, moderate: 0, minor: 0, total: 0 },
-      rawViolations: "[]",
+      reviewViolations: { critical: 0, serious: 0, moderate: 0, minor: 0, total: 0 },
+      rawFindings: "[]",
+      findingsVersion: 2,
+      engineProfile: "strict",
+      engineSummary: { selectedEngines: ["axe"], engines: [] },
       pageTitle: "Test",
       safeMode: false,
       truncated: false,
@@ -397,7 +413,11 @@ describe("ViewportScanResult type", () => {
   it("can be constructed with required fields", () => {
     const result: ViewportScanResult = {
       violations: { critical: 0, serious: 0, moderate: 0, minor: 0, total: 0 },
-      rawViolations: "[]",
+      reviewViolations: { critical: 0, serious: 0, moderate: 0, minor: 0, total: 0 },
+      rawFindings: "[]",
+      findingsVersion: 2,
+      engineProfile: "strict",
+      engineSummary: { selectedEngines: ["axe"], engines: [] },
       safeMode: false,
       truncated: false,
     };
@@ -411,7 +431,11 @@ describe("DualScanResult type", () => {
   it("wraps desktop and mobile ViewportScanResults", () => {
     const vp: ViewportScanResult = {
       violations: { critical: 0, serious: 0, moderate: 0, minor: 0, total: 0 },
-      rawViolations: "[]",
+      reviewViolations: { critical: 0, serious: 0, moderate: 0, minor: 0, total: 0 },
+      rawFindings: "[]",
+      findingsVersion: 2,
+      engineProfile: "strict",
+      engineSummary: { selectedEngines: ["axe"], engines: [] },
       safeMode: false,
       truncated: false,
     };
