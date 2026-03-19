@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 import { api } from "../../../../../convex/_generated/api";
 import type { Id } from "../../../../../convex/_generated/dataModel";
 import { getConvexClient } from "@/lib/convex-server";
@@ -36,6 +36,19 @@ function isHttpUrl(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+function scheduleAiAnalysis(
+  convex: NonNullable<ReturnType<typeof getConvexClient>>,
+  auditId: Id<"audits">,
+) {
+  after(async () => {
+    try {
+      await convex.action(api.ai.analyzeViolations, { auditId });
+    } catch (error) {
+      console.error("[Extension Ingest] AI analysis failed:", error);
+    }
+  });
 }
 
 export async function POST(request: NextRequest) {
@@ -152,11 +165,7 @@ export async function POST(request: NextRequest) {
       claimTokenHash,
     });
 
-    void convex
-      .action(api.ai.analyzeViolations, {
-        auditId: auditId as Id<"audits">,
-      })
-      .catch(() => {});
+    scheduleAiAnalysis(convex, auditId as Id<"audits">);
 
     const resultsUrl = new URL(
       buildExtensionResultsUrl(url, Date.now(), auditId),
