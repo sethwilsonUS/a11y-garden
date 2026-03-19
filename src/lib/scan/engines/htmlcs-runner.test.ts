@@ -39,15 +39,23 @@ describe("runHtmlcsOnDom", () => {
             msg: "Headings should not skip levels",
             element: img,
           },
+          {
+            type: 2,
+            code: "WCAG2AA.Principle2.Guideline2_4.2_4_2.H25.1.NoTitleEl",
+            msg: "Pages should have a title",
+            element: img,
+          },
         ];
       },
     };
 
     const findings = await runHtmlcsOnDom(dom.window as unknown as DOMWindow);
 
-    expect(findings).toHaveLength(2);
+    expect(findings).toHaveLength(3);
     expect(findings[0].nodes[0].selector).toBe("document");
     expect(findings[1].nodes[0].selector).toContain("img");
+    expect(findings[1].impact).toBe("serious");
+    expect(findings[2].impact).toBe("minor");
 
     dom.window.close();
   });
