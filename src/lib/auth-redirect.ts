@@ -1,11 +1,14 @@
 "use client";
 
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname } from "next/navigation";
+
+function readCurrentSearch() {
+  return typeof window === "undefined" ? "" : window.location.search;
+}
 
 export function useAuthRedirectUrl() {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
-  const query = searchParams.toString();
+  const search = readCurrentSearch();
 
-  return query ? `${pathname}?${query}` : pathname;
+  return search ? `${pathname}${search}` : pathname;
 }
