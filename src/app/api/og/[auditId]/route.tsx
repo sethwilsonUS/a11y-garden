@@ -35,7 +35,7 @@ export async function GET(
   if (CONVEX_URL) {
     try {
       const client = new ConvexHttpClient(CONVEX_URL);
-      const audit = await client.query(api.audits.getAudit, {
+      const audit = await client.query(api.audits.getAuditForViewer, {
         auditId: auditId as Id<"audits">,
       });
 

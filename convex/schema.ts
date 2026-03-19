@@ -118,6 +118,28 @@ export default defineSchema({
     mobileAiSummary: v.optional(v.string()),
     mobileTopIssues: v.optional(v.array(v.string())),
 
+    // Audit origin and access control
+    scanSource: v.optional(
+      v.union(
+        v.literal("web"),
+        v.literal("cli"),
+        v.literal("extension"),
+      ),
+    ),
+    viewportMode: v.optional(
+      v.union(
+        v.literal("paired"),
+        v.literal("desktop-only"),
+        v.literal("live"),
+      ),
+    ),
+    viewportWidth: v.optional(v.number()),
+    viewportHeight: v.optional(v.number()),
+    isClaimed: v.optional(v.boolean()),
+    viewTokenHash: v.optional(v.string()),
+    claimTokenHash: v.optional(v.string()),
+    claimedAt: v.optional(v.number()),
+
     // User association
     userId: v.optional(v.string()),
     isPublic: v.boolean(),

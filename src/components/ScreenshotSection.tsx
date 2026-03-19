@@ -10,6 +10,7 @@ interface ScreenshotSectionProps {
   auditId: Id<"audits">;
   viewport?: "desktop" | "mobile";
   scanMode?: "full" | "safe" | "jsdom-structural";
+  viewToken?: string | null;
 }
 
 /**
@@ -21,10 +22,21 @@ interface ScreenshotSectionProps {
  *  - No screenshot (null)      → subtle "not available" note
  *  - Screenshot available (URL) → collapsible image viewer
  */
-export function ScreenshotSection({ auditId, viewport = "desktop", scanMode }: ScreenshotSectionProps) {
+export function ScreenshotSection({
+  auditId,
+  viewport = "desktop",
+  scanMode,
+  viewToken,
+}: ScreenshotSectionProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const desktopUrl = useQuery(api.audits.getScreenshotUrl, { auditId });
-  const mobileUrl = useQuery(api.audits.getMobileScreenshotUrl, { auditId });
+  const desktopUrl = useQuery(api.audits.getScreenshotUrl, {
+    auditId,
+    ...(viewToken ? { viewToken } : {}),
+  });
+  const mobileUrl = useQuery(api.audits.getMobileScreenshotUrl, {
+    auditId,
+    ...(viewToken ? { viewToken } : {}),
+  });
 
   const screenshotUrl = viewport === "mobile" ? mobileUrl : desktopUrl;
   const isMobile = viewport === "mobile";

@@ -192,6 +192,34 @@ describe("generateMarkdownReport", () => {
     });
   });
 
+  describe("extension scan notes", () => {
+    it("includes the live viewport dimensions for extension audits", () => {
+      const md = generateMarkdownReport(
+        makeReport({
+          scanSource: "extension",
+          viewportMode: "live",
+          viewportWidth: 1440,
+          viewportHeight: 900,
+        }),
+      );
+
+      expect(md).toContain("**Viewport:** Live tab (1440×900)");
+    });
+
+    it("calls out that extension scans do not store screenshots by default", () => {
+      const md = generateMarkdownReport(
+        makeReport({
+          scanSource: "extension",
+          viewportMode: "live",
+        }),
+      );
+
+      expect(md).toContain(
+        "**Privacy:** Extension scans do not store screenshots by default.",
+      );
+    });
+  });
+
   // ═══════════════════════════════════════════════════════════════════════════
   // AI SUMMARY
   // ═══════════════════════════════════════════════════════════════════════════

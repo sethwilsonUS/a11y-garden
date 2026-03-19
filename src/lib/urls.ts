@@ -50,6 +50,14 @@ export function buildResultsUrl(
   return `/results/${slug}/${date}/${auditId}`;
 }
 
+export function buildExtensionResultsUrl(
+  url: string,
+  scannedAt: number,
+  auditId: string,
+): string {
+  return `${buildResultsUrl(url, scannedAt, auditId)}?source=extension`;
+}
+
 /**
  * Extract the audit ID from results route segments.
  *

@@ -1,9 +1,10 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { internalQuery, mutation, query } from "./_generated/server";
 import { calculateGrade, GRADING_VERSION } from "./lib/grading";
 import { deduplicateByUrl } from "./lib/dedup";
-import { Id } from "./_generated/dataModel";
+import { Doc, Id } from "./_generated/dataModel";
 import { MutationCtx, QueryCtx } from "./_generated/server";
+import { hashAuditAccessToken } from "../shared/audit-access";
 
 // ---------------------------------------------------------------------------
 // Auth helpers
@@ -40,6 +41,48 @@ async function verifyAuditOwnership(
   }
 
   return audit;
+}
+
+function isProtectedExtensionAudit(audit: Doc<"audits">): boolean {
+  return audit.scanSource === "extension" && audit.isPublic !== true;
+}
+
+async function hasValidViewToken(
+  audit: Doc<"audits">,
+  rawToken: string | undefined,
+): Promise<boolean> {
+  if (!audit.viewTokenHash || !rawToken) return false;
+  return (await hashAuditAccessToken(rawToken)) === audit.viewTokenHash;
+}
+
+async function canViewerAccessAudit(
+  ctx: QueryCtx,
+  audit: Doc<"audits">,
+  rawViewToken?: string,
+): Promise<boolean> {
+  if (audit.isPublic) return true;
+
+  const callerId = await getAuthUserId(ctx);
+  if (audit.userId && callerId === audit.userId) {
+    return true;
+  }
+
+  if (isProtectedExtensionAudit(audit)) {
+    return hasValidViewToken(audit, rawViewToken);
+  }
+
+  // Preserve the current link-only semantics for legacy/private web audits.
+  return true;
+}
+
+async function getAccessibleAudit(
+  ctx: QueryCtx,
+  auditId: Id<"audits">,
+  rawViewToken?: string,
+): Promise<Doc<"audits"> | null> {
+  const audit = await ctx.db.get(auditId);
+  if (!audit) return null;
+  return (await canViewerAccessAudit(ctx, audit, rawViewToken)) ? audit : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -82,6 +125,8 @@ export const createAudit = mutation({
       score: 0,
       userId: userId ?? undefined,
       isPublic: userId ? args.isPublic : false,
+      scanSource: "web",
+      viewportMode: "paired",
     });
 
     // Note: Scanner is now triggered client-side via Next.js API route
@@ -94,9 +139,21 @@ export const createAudit = mutation({
 // Get audit by ID
 export const getAudit = query({
   args: { auditId: v.id("audits") },
-  handler: async (ctx, args) => {
-    return await ctx.db.get(args.auditId);
+  handler: async (ctx, args) => getAccessibleAudit(ctx, args.auditId),
+});
+
+export const getAuditForViewer = query({
+  args: {
+    auditId: v.id("audits"),
+    viewToken: v.optional(v.string()),
   },
+  handler: async (ctx, args) =>
+    getAccessibleAudit(ctx, args.auditId, args.viewToken),
+});
+
+export const getAuditInternal = internalQuery({
+  args: { auditId: v.id("audits") },
+  handler: async (ctx, args) => await ctx.db.get(args.auditId),
 });
 
 // Get all public audits, deduplicated by URL (latest per URL).
@@ -272,6 +329,26 @@ export const updateAuditWithResults = mutation({
     mobileTruncated: v.optional(v.boolean()),
     // robots.txt advisory
     robotsDisallowed: v.optional(v.boolean()),
+    scanSource: v.optional(
+      v.union(
+        v.literal("web"),
+        v.literal("cli"),
+        v.literal("extension"),
+      ),
+    ),
+    viewportMode: v.optional(
+      v.union(
+        v.literal("paired"),
+        v.literal("desktop-only"),
+        v.literal("live"),
+      ),
+    ),
+    viewportWidth: v.optional(v.number()),
+    viewportHeight: v.optional(v.number()),
+    isClaimed: v.optional(v.boolean()),
+    viewTokenHash: v.optional(v.string()),
+    claimTokenHash: v.optional(v.string()),
+    claimedAt: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     await verifyAuditOwnership(ctx, args.auditId);
@@ -444,6 +521,47 @@ export const updateAuditVisibility = mutation({
   },
 });
 
+export const claimExtensionAudit = mutation({
+  args: {
+    auditId: v.id("audits"),
+    claimToken: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) {
+      throw new Error("Authentication required");
+    }
+
+    const audit = await ctx.db.get(args.auditId);
+    if (!audit) {
+      throw new Error("Audit not found");
+    }
+    if (audit.scanSource !== "extension") {
+      throw new Error("Only extension audits can be claimed");
+    }
+    if (audit.isClaimed || audit.userId) {
+      throw new Error("This audit has already been claimed");
+    }
+    if (!audit.claimTokenHash) {
+      throw new Error("This audit cannot be claimed");
+    }
+
+    const hashedClaimToken = await hashAuditAccessToken(args.claimToken);
+    if (hashedClaimToken !== audit.claimTokenHash) {
+      throw new Error("Invalid claim token");
+    }
+
+    await ctx.db.patch(args.auditId, {
+      userId,
+      isClaimed: true,
+      claimedAt: Date.now(),
+      claimTokenHash: undefined,
+    });
+
+    return { success: true };
+  },
+});
+
 // Get recent audits for homepage
 export const getRecentAudits = query({
   args: { limit: v.optional(v.number()) },
@@ -465,9 +583,12 @@ export const getRecentAudits = query({
 
 // Get the screenshot URL for an audit (resolves storageId → serving URL)
 export const getScreenshotUrl = query({
-  args: { auditId: v.id("audits") },
+  args: {
+    auditId: v.id("audits"),
+    viewToken: v.optional(v.string()),
+  },
   handler: async (ctx, args) => {
-    const audit = await ctx.db.get(args.auditId);
+    const audit = await getAccessibleAudit(ctx, args.auditId, args.viewToken);
     if (!audit?.screenshotId) return null;
     return await ctx.storage.getUrl(audit.screenshotId);
   },
@@ -475,9 +596,12 @@ export const getScreenshotUrl = query({
 
 // Get the agent plan file URL for an audit (resolves storageId → serving URL)
 export const getAgentPlanUrl = query({
-  args: { auditId: v.id("audits") },
+  args: {
+    auditId: v.id("audits"),
+    viewToken: v.optional(v.string()),
+  },
   handler: async (ctx, args) => {
-    const audit = await ctx.db.get(args.auditId);
+    const audit = await getAccessibleAudit(ctx, args.auditId, args.viewToken);
     if (!audit?.agentPlanFileId) return null;
     return await ctx.storage.getUrl(audit.agentPlanFileId);
   },
@@ -485,9 +609,12 @@ export const getAgentPlanUrl = query({
 
 // Get the mobile screenshot URL for an audit (resolves storageId → serving URL)
 export const getMobileScreenshotUrl = query({
-  args: { auditId: v.id("audits") },
+  args: {
+    auditId: v.id("audits"),
+    viewToken: v.optional(v.string()),
+  },
   handler: async (ctx, args) => {
-    const audit = await ctx.db.get(args.auditId);
+    const audit = await getAccessibleAudit(ctx, args.auditId, args.viewToken);
     if (!audit?.mobileScreenshotId) return null;
     return await ctx.storage.getUrl(audit.mobileScreenshotId);
   },

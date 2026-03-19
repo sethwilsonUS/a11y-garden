@@ -10,8 +10,9 @@ import { calculateGrade, calculateCombinedGrade, GRADING_VERSION } from "@/lib/g
 import { generateMarkdownReport, type ReportData } from "@/lib/report";
 import { buildResultsUrl, parseResultsSegments } from "@/lib/urls";
 import { PLATFORM_LABELS, getPlatformConfidence } from "@/lib/platforms";
+import { getExtensionViewTokenStorageKey } from "../../../../shared/audit-access";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { use, useEffect, useRef, useState, useCallback } from "react";
 import { useAuth, SignInButton } from "@clerk/nextjs";
 import { WafBadge } from "@/components/WafBadge";
@@ -26,6 +27,24 @@ interface Audit extends ReportData {
   domain: string;
   truncated?: boolean;
   platform?: string;
+  scanSource?: "web" | "cli" | "extension";
+  viewportMode?: "paired" | "desktop-only" | "live";
+  viewportWidth?: number;
+  viewportHeight?: number;
+  isClaimed?: boolean;
+  viewTokenHash?: string;
+  claimTokenHash?: string;
+  claimedAt?: number;
+  userId?: string;
+  isPublic: boolean;
+  status: "pending" | "scanning" | "analyzing" | "complete" | "error";
+  scanProgress?: string;
+  errorMessage?: string;
+  scanModeDetail?: string;
+  agentPlanFileId?: string;
+  robotsDisallowed?: boolean;
+  mobileRawFindings?: string;
+  mobileScanModeDetail?: string;
   // Mobile viewport fields (optional — missing for pre-mobile audits)
   mobileViolations?: { critical: number; serious: number; moderate: number; minor: number; total: number };
   mobileLetterGrade?: string;
@@ -48,7 +67,11 @@ function CopyReportButton({ audit }: { audit: Audit }) {
 
   const handleCopy = () => {
     track("Copy Report");
-    const reportUrl = typeof window !== "undefined" ? window.location.href : undefined;
+    const reportUrl =
+      typeof window !== "undefined" &&
+      !(audit.scanSource === "extension" && !audit.isPublic)
+        ? window.location.href
+        : undefined;
     const markdown = generateMarkdownReport(audit, reportUrl);
     navigator.clipboard.writeText(markdown);
     setCopied(true);
@@ -245,14 +268,76 @@ export default function ResultsPage({
   const { segments } = use(params);
   const { auditId, isLegacy } = parseResultsSegments(segments);
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { userId } = useAuth();
+  const openedFromExtension = searchParams.get("source") === "extension";
+  const typedAuditId = auditId as Id<"audits">;
+  const [viewToken, setViewToken] = useState<string | null | undefined>(
+    openedFromExtension ? undefined : null,
+  );
+  const [isClaimingAudit, setIsClaimingAudit] = useState(false);
 
-  const audit = useQuery(api.audits.getAudit, {
-    auditId: auditId as Id<"audits">,
-  });
+  useEffect(() => {
+    if (!openedFromExtension) {
+      setViewToken(null);
+      return;
+    }
+
+    const storageKey = getExtensionViewTokenStorageKey(auditId);
+    let settled = false;
+
+    const applyStoredToken = () => {
+      const token = window.sessionStorage.getItem(storageKey);
+      if (!token) return false;
+      settled = true;
+      setViewToken(token);
+      return true;
+    };
+
+    if (applyStoredToken()) {
+      return;
+    }
+
+    const handleBridgeMessage = (event: MessageEvent) => {
+      if (event.source !== window) return;
+      if (event.data?.type !== "A11Y_GARDEN_VIEW_TOKEN_READY") return;
+      if (event.data?.auditId !== auditId) return;
+      applyStoredToken();
+    };
+
+    let attempts = 0;
+    const pollId = window.setInterval(() => {
+      attempts += 1;
+      if (applyStoredToken()) {
+        window.clearInterval(pollId);
+        return;
+      }
+      if (attempts >= 20) {
+        window.clearInterval(pollId);
+        if (!settled) setViewToken(null);
+      }
+    }, 150);
+
+    window.addEventListener("message", handleBridgeMessage);
+    return () => {
+      window.clearInterval(pollId);
+      window.removeEventListener("message", handleBridgeMessage);
+    };
+  }, [auditId, openedFromExtension]);
+
+  const audit = useQuery(
+    api.audits.getAuditForViewer,
+    viewToken === undefined
+      ? "skip"
+      : {
+          auditId: typedAuditId,
+          ...(viewToken ? { viewToken } : {}),
+        },
+  );
   const recalculateGrade = useMutation(api.audits.recalculateGrade);
   const deleteAudit = useMutation(api.audits.deleteAudit);
   const updateVisibility = useMutation(api.audits.updateAuditVisibility);
+  const claimExtensionAudit = useMutation(api.audits.claimExtensionAudit);
   const hasRecalculated = useRef(false);
   const hasRedirected = useRef(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -287,12 +372,97 @@ export default function ResultsPage({
   }, [showDeleteDialog]);
 
   const isOwner = !!(userId && audit?.userId && userId === audit.userId);
+  const isExtensionAudit = audit?.scanSource === "extension";
+  const isLiveViewportAudit = audit?.viewportMode === "live";
+  const canClaimExtensionAudit =
+    !!audit &&
+    audit.scanSource === "extension" &&
+    !audit.isClaimed &&
+    !audit.userId &&
+    !!userId;
+  const hideShareActions =
+    !!audit &&
+    audit.scanSource === "extension" &&
+    !audit.isPublic;
 
   const showStatus = useCallback((msg: string) => {
     setStatusMessage(msg);
     const t = setTimeout(() => setStatusMessage(""), 4000);
     return () => clearTimeout(t);
   }, []);
+
+  const requestClaimToken = useCallback(async () => {
+    const requestId = crypto.randomUUID();
+
+    return await new Promise<string>((resolve, reject) => {
+      const timeoutId = window.setTimeout(() => {
+        window.removeEventListener("message", handleMessage);
+        reject(
+          new Error(
+            "Claim token not available. Reopen this audit from the browser extension and try again.",
+          ),
+        );
+      }, 3_000);
+
+      function handleMessage(event: MessageEvent) {
+        if (event.source !== window) return;
+        if (event.data?.type !== "A11Y_GARDEN_CLAIM_TOKEN_RESPONSE") return;
+        if (event.data?.requestId !== requestId) return;
+
+        window.clearTimeout(timeoutId);
+        window.removeEventListener("message", handleMessage);
+
+        if (typeof event.data?.claimToken === "string") {
+          resolve(event.data.claimToken);
+          return;
+        }
+
+        reject(
+          new Error(
+            "Claim token not available. Reopen this audit from the browser extension and try again.",
+          ),
+        );
+      }
+
+      window.addEventListener("message", handleMessage);
+      window.postMessage(
+        {
+          type: "A11Y_GARDEN_CLAIM_TOKEN_REQUEST",
+          auditId,
+          requestId,
+        },
+        window.location.origin,
+      );
+    });
+  }, [auditId]);
+
+  const handleClaimAudit = useCallback(async () => {
+    if (!audit) return;
+
+    setIsClaimingAudit(true);
+    try {
+      const claimToken = await requestClaimToken();
+      await claimExtensionAudit({
+        auditId: audit._id,
+        claimToken,
+      });
+      track("Extension Audit Claimed");
+      showStatus("Audit claimed and saved to your dashboard");
+      window.postMessage(
+        {
+          type: "A11Y_GARDEN_CLAIM_COMPLETE",
+          auditId,
+        },
+        window.location.origin,
+      );
+    } catch (error) {
+      showStatus(
+        error instanceof Error ? error.message : "Failed to claim audit",
+      );
+    } finally {
+      setIsClaimingAudit(false);
+    }
+  }, [audit, auditId, claimExtensionAudit, requestClaimToken, showStatus]);
 
   const handleToggleVisibility = useCallback(async () => {
     if (!audit) return;
@@ -408,13 +578,15 @@ export default function ResultsPage({
               </svg>
             </div>
             <h1 className="text-2xl font-display font-bold text-theme-primary mb-4">
-              Audit Not Found
+              {openedFromExtension ? "Private Extension Audit Locked" : "Audit Not Found"}
             </h1>
             <p className="text-theme-secondary mb-8">
-              The audit you&apos;re looking for doesn&apos;t exist or has been removed.
+              {openedFromExtension
+                ? "This audit must be reopened from the A11y Garden extension, or viewed by the signed-in owner who claimed it."
+                : "The audit you&apos;re looking for doesn&apos;t exist or has been removed."}
             </p>
             <Link href="/" className="btn-primary">
-              Start New Scan
+              {openedFromExtension ? "Open A11y Garden" : "Start New Scan"}
             </Link>
           </div>
         </div>
@@ -566,6 +738,17 @@ export default function ResultsPage({
                     {formatEngineProfile(audit.engineProfile)} profile
                   </span>
                 )}
+                {isLiveViewportAudit && (
+                  <span className="inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full bg-theme-secondary border border-theme text-theme-secondary">
+                    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 5h14v14H5z" />
+                    </svg>
+                    Live viewport
+                    {audit.viewportWidth && audit.viewportHeight
+                      ? ` ${audit.viewportWidth}×${audit.viewportHeight}`
+                      : ""}
+                  </span>
+                )}
                 <WafBadge
                   wafDetected={audit.wafDetected}
                   wafBypassed={audit.wafBypassed}
@@ -606,10 +789,18 @@ export default function ResultsPage({
                   Private Scan
                 </h3>
                 <p className="text-sm text-theme-secondary">
-                  This result is <strong className="text-theme-primary font-medium">private</strong> &mdash; it will not appear in or be stored in the public database.
-                  Only people with this direct link can view it.{" "}
-                  {!audit.userId && (
-                    <>Bookmark this page to return to it later &mdash; private scans from guests aren&apos;t saved to an account.</>
+                  This result is <strong className="text-theme-primary font-medium">private</strong> &mdash; it will not appear in the public database.
+                  {isExtensionAudit ? (
+                    <>
+                      {" "}Private extension scans stay tied to the extension session that opened them, and they can only be shared after a signed-in owner claims them and explicitly makes them public.
+                    </>
+                  ) : (
+                    <>
+                      {" "}Only people with this direct link can view it.
+                    </>
+                  )}
+                  {!audit.userId && !isExtensionAudit && (
+                    <> Bookmark this page to return to it later &mdash; private scans from guests aren&apos;t saved to an account.</>
                   )}
                 </p>
               </div>
@@ -626,18 +817,40 @@ export default function ResultsPage({
               </div>
               <div className="flex-1">
                 <h3 className="text-sm font-semibold text-theme-primary mb-1">
-                  Save Your Bounty
+                  {isExtensionAudit ? "Claim This Extension Scan" : "Save Your Bounty"}
                 </h3>
                 <p className="text-sm text-theme-secondary mb-3">
-                  Sign in to save results to your dashboard, track improvements over time, and share in the community garden.
+                  {isExtensionAudit
+                    ? "Sign in, then reopen this result from the extension to claim it into your dashboard. Unclaimed extension scans cannot be shared."
+                    : "Sign in to save results to your dashboard, track improvements over time, and share in the community garden."}
                 </p>
                 <SignInButton mode="modal">
                   <button className="btn-primary text-sm py-2 px-4 cursor-pointer">
-                    Sign In to Save
+                    {isExtensionAudit ? "Sign In to Claim" : "Sign In to Save"}
                   </button>
                 </SignInButton>
               </div>
             </div>
+          )}
+
+          {canClaimExtensionAudit && (
+            <section className="rounded-xl p-4 border border-theme bg-theme-secondary flex flex-col sm:flex-row sm:items-center gap-4">
+              <div className="flex-1">
+                <h2 className="text-sm font-semibold text-theme-primary mb-1">
+                  Claim This Extension Scan
+                </h2>
+                <p className="text-sm text-theme-secondary">
+                  Claiming attaches this private scan to your account so it appears in your dashboard. It will stay private until you intentionally publish it.
+                </p>
+              </div>
+              <button
+                onClick={handleClaimAudit}
+                disabled={isClaimingAudit}
+                className="btn-primary text-sm cursor-pointer disabled:opacity-70 disabled:cursor-not-allowed"
+              >
+                {isClaimingAudit ? "Claiming..." : "Claim Scan"}
+              </button>
+            </section>
           )}
 
           {/* Owner Actions */}
@@ -811,6 +1024,18 @@ export default function ResultsPage({
             const vpRawViolations = isDesktop ? audit.rawViolations : audit.mobileRawViolations;
             const vpEngineSummary = isDesktop ? audit.engineSummary : audit.mobileEngineSummary;
             const vpViewport: "desktop" | "mobile" = isDesktop ? "desktop" : "mobile";
+            const viewportHeading = isLiveViewportAudit
+              ? "Live Tab Score"
+              : isDesktop
+                ? "Desktop Score"
+                : "Mobile Score";
+            const viewportSubheading = isLiveViewportAudit
+              ? audit.viewportWidth && audit.viewportHeight
+                ? `${audit.viewportWidth}×${audit.viewportHeight} live browser viewport`
+                : "Current live browser viewport"
+              : isDesktop
+                ? "1920×1080 viewport"
+                : "390×844 viewport (iPhone 14/15)";
 
             return (
               <div id={`panel-${vpViewport}`} role="tabpanel" className="space-y-8">
@@ -820,10 +1045,10 @@ export default function ResultsPage({
                     <GradeBadge grade={vpGrade} score={vpScore} size="md" />
                     <div>
                       <p className="text-sm font-semibold text-theme-primary">
-                        {isDesktop ? "Desktop" : "Mobile"} Score
+                        {viewportHeading}
                       </p>
                       <p className="text-xs text-theme-muted">
-                        {isDesktop ? "1920×1080 viewport" : "390×844 viewport (iPhone 14/15)"}
+                        {viewportSubheading}
                       </p>
                     </div>
                   </div>
@@ -880,7 +1105,35 @@ export default function ResultsPage({
                 )}
 
                 {/* Page Screenshot */}
-                <ScreenshotSection auditId={audit._id} viewport={vpViewport} scanMode={vpScanMode} />
+                {isExtensionAudit ? (
+                  <div
+                    className="rounded-xl p-4 flex items-start gap-3 border border-theme bg-theme-secondary"
+                    role="note"
+                    aria-label="extension privacy note"
+                  >
+                    <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-theme-tertiary flex items-center justify-center">
+                      <svg className="w-4 h-4 text-theme-muted" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 9l6 6m0-6l-6 6" />
+                      </svg>
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-theme-primary">
+                        Screenshot Omitted for Privacy
+                      </p>
+                      <p className="text-sm text-theme-muted mt-0.5">
+                        Extension scans do not upload screenshots in v1. This helps protect logged-in and otherwise sensitive page states from being stored on the server.
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <ScreenshotSection
+                    auditId={audit._id}
+                    viewport={vpViewport}
+                    scanMode={vpScanMode}
+                    viewToken={viewToken ?? null}
+                  />
+                )}
 
                 {/* Violations by Severity */}
                 <section>
@@ -1024,21 +1277,24 @@ export default function ResultsPage({
               domain={audit.domain}
               isOwner={isOwner}
               isSignedIn={!!userId}
+              viewToken={viewToken ?? null}
             />
-            <ButtonCard>
-              <button
-                onClick={() => {
-                  track("Copy Link");
-                  navigator.clipboard.writeText(window.location.href);
-                }}
-                className="btn-secondary cursor-pointer"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                </svg>
-                Copy Link
-              </button>
-            </ButtonCard>
+            {!hideShareActions && (
+              <ButtonCard>
+                <button
+                  onClick={() => {
+                    track("Copy Link");
+                    navigator.clipboard.writeText(window.location.href);
+                  }}
+                  className="btn-secondary cursor-pointer"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                  </svg>
+                  Copy Link
+                </button>
+              </ButtonCard>
+            )}
           </section>
         </div>
       </div>

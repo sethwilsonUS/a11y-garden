@@ -33,6 +33,7 @@ A friendly accessibility audit tool that provides AI insights and specific, acti
 - 🛡️ **Rate Limiting & Concurrency** — Per-user (30/hr authenticated, 10/hr anonymous) sliding window and global concurrency cap via Upstash Redis
 - 🔒 **SSRF Protection** — URL validation blocks private IP ranges and non-HTTP schemes in production
 - 📸 **Page Screenshots** — Captures JPEG screenshots at both viewports so users can verify the scanner reached the real site (including WAF-bypassed sites via BQL, quality 90 for BQL / 75 for Playwright). Includes a retry mechanism when BQL returns partial screenshots.
+- 🧩 **Chrome Extension (Local Unpacked)** — Run a desktop live scan against the page exactly as you see it in Chrome, then open a protected hosted private result on either `localhost` or `https://a11ygarden.org`
 - 🧱 **WAF Bypass (BQL + Live Browser Handoff)** — Automatically detects and bypasses Web Application Firewalls using Browserless BrowserQL stealth mode with a 3-tier escalation chain (stealth + proxy, extended navigation wait, Cloudflare challenge solver). Comprehensive scans reconnect the solved session back to Playwright when possible; otherwise the app falls back to a clearly-flagged structural axe-core scan via JSDOM.
 - 🔀 **Smart Fallback Strategy** — Tries fast Playwright BaaS first, detects WAF blocks or timeouts, then escalates to BQL for authenticated users. Correctly distinguishes WAF blocks from Browserless API errors (quota, auth). Leverages Vercel Pro's 5-minute function limit for complex WAF bypasses. Strategy auto-detection prioritizes Vercel environment to prevent misconfiguration.
 - 📱 **Smart Dual-Viewport for BQL** — Detects adaptive serving (mobile subdomains, AMP alternates, Vary headers) and only runs a second BQL call when the site genuinely serves different mobile HTML. Responsive sites reuse a single scan.
@@ -247,6 +248,47 @@ npm run cli -- walmart.com
 # Forces local Playwright
 npm run cli -- walmart.com --local
 ```
+
+---
+
+## Chrome Extension (Local Unpacked)
+
+The Chrome extension is a supported local workflow for desktop live scans. It is not in the Chrome Web Store yet, so for now you install it as an unpacked extension and point its `A11y Garden origin` at either local dev or production.
+
+### Local Install
+
+```bash
+npm run build:extension
+```
+
+1. Open `chrome://extensions`
+2. Turn on **Developer mode**
+3. Click **Load unpacked**
+4. Select `extension/dist`
+
+The unpacked extension scans regular `http(s)` pages only and opens a protected hosted private result in a new tab.
+
+### Choosing the A11y Garden Origin
+
+Use the popup's `A11y Garden origin` field to decide where the hosted result should be created:
+
+- `http://localhost:3000` for local development
+- `https://a11ygarden.org` for production
+
+If you change extension files, rebuild with `npm run build:extension` and click **Reload** on the unpacked extension in `chrome://extensions`.
+
+### Using It Against Production
+
+You can keep the extension installed locally as an unpacked extension and point it at `https://a11ygarden.org`. That works as long as the backend is deployed and `https://a11ygarden.org/api/extension/ingest` is live with working Convex configuration.
+
+### Troubleshooting
+
+- **Scan fails immediately:** Make sure you're on a regular `http(s)` page. Chrome internal pages, extension pages, and the New Tab page are not scannable.
+- **Production scans fail:** Confirm the deployed app includes `/api/extension/ingest` and that Convex is configured in that environment.
+- **Results open on the wrong host or fail to save:** Check the popup's `A11y Garden origin` value.
+- **Recent extension code changes do not show up:** Rebuild with `npm run build:extension`, then click **Reload** in `chrome://extensions`.
+
+For operational details, file references, and a backend checklist, see [docs/extension.md](docs/extension.md).
 
 ---
 

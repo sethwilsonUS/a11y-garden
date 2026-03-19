@@ -24,6 +24,7 @@ interface AgentPlanButtonProps {
   domain: string;
   isOwner: boolean;
   isSignedIn: boolean;
+  viewToken?: string | null;
 }
 
 const GRACE_PERIOD_MS = 60_000;
@@ -38,13 +39,22 @@ function AgentPlanButtonInner({
   domain,
   isOwner,
   isSignedIn,
+  viewToken,
 }: AgentPlanButtonProps) {
   const [isGenerating, setIsGenerating] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [viewerOpen, setViewerOpen] = useState(false);
   const graceTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const agentPlanUrl = useQuery(api.audits.getAgentPlanUrl, { auditId });
+  const agentPlanUrl = useQuery(
+    api.audits.getAgentPlanUrl,
+    isSignedIn && isOwner
+      ? {
+          auditId,
+          ...(viewToken ? { viewToken } : {}),
+        }
+      : "skip",
+  );
   const generateAgentPlan = useAction(api.agentPlan.generateAgentPlan);
   const [prevFileId, setPrevFileId] = useState(agentPlanFileId);
 
