@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { after, NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { calculateGrade, calculateCombinedGrade, GRADING_VERSION } from "@/lib/grading";
 import {
@@ -36,6 +36,19 @@ function toScanModeField(
 ): "full" | "safe" | "jsdom-structural" {
   if (info.mode === "safe-rules") return "safe";
   return info.mode;
+}
+
+function scheduleAiAnalysis(
+  convex: NonNullable<ReturnType<typeof getConvexClient>>,
+  auditId: Id<"audits">,
+) {
+  after(async () => {
+    try {
+      await convex.action(api.ai.analyzeViolations, { auditId });
+    } catch (error) {
+      console.error("[Scan] AI analysis failed:", error);
+    }
+  });
 }
 
 export async function POST(request: NextRequest) {
@@ -350,10 +363,9 @@ export async function POST(request: NextRequest) {
               ...(robotsCheck.disallowed ? { robotsDisallowed: true } : {}),
             });
 
-            // Fire AI analysis (non-blocking)
-            convex
-              .action(api.ai.analyzeViolations, { auditId })
-              .catch(() => {});
+            // Fire AI analysis after the request completes so the work is not
+            // dropped when the serverless response finishes.
+            scheduleAiAnalysis(convex, auditId);
 
             persisted = true;
             console.warn("[Scan] Results persisted to Convex server-side");
