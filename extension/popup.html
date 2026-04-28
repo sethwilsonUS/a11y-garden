@@ -12,21 +12,57 @@
         <p class="eyebrow">A11y Garden</p>
         <h1>Live Scan</h1>
         <p class="lede">
-          Scan the current tab as you see it, then open a protected hosted result.
+          Scan the current tab and keep results locally in this browser.
         </p>
       </header>
 
       <section class="card" aria-labelledby="current-tab-title">
         <p class="label">Current tab</p>
-        <h2 id="current-tab-title" class="tab-title">Loading…</h2>
+        <h2 id="current-tab-title" class="tab-title">Loading...</h2>
         <p id="current-tab-url" class="tab-url"></p>
       </section>
 
       <section class="card" aria-labelledby="scan-settings-title">
-        <h2 id="scan-settings-title" class="section-title">Scan Settings</h2>
+        <h2 id="scan-settings-title" class="section-title">Scan Options</h2>
+        <p class="settings-note">
+          Every scan runs axe-core, HTML_CodeSniffer, and IBM ACE locally.
+        </p>
+
+        <div class="toggles">
+          <label class="toggle-option">
+            <input id="capture-screenshot" type="checkbox" />
+            <span>
+              <strong>Capture screenshot</strong>
+              <small>Stored locally with this result</small>
+            </span>
+          </label>
+          <label class="toggle-option">
+            <input id="include-mobile" type="checkbox" />
+            <span>
+              <strong>Mobile clone</strong>
+              <small>Temporarily opens a 390x844 tab</small>
+            </span>
+          </label>
+        </div>
+
+        <button id="scan-button" class="scan-button" type="button">
+          Scan Current Tab
+        </button>
+        <p id="status" class="status" role="status" aria-live="polite"></p>
+      </section>
+
+      <section class="card" aria-labelledby="ai-settings-title">
+        <h2 id="ai-settings-title" class="section-title">AI Insights</h2>
+        <label class="toggle-option">
+          <input id="ai-insights" type="checkbox" />
+          <span>
+            <strong>Enable AI requests</strong>
+            <small>Requires sign-in on a11ygarden.org</small>
+          </span>
+        </label>
 
         <label class="field">
-          <span class="label">A11y Garden origin</span>
+          <span class="label">A11y Garden account origin</span>
           <input
             id="app-origin"
             type="url"
@@ -36,28 +72,14 @@
           />
         </label>
 
-        <fieldset class="modes">
-          <legend class="label">Mode</legend>
-          <label class="mode-option">
-            <input type="radio" name="mode" value="fast" checked />
-            <span>
-              <strong>Fast</strong>
-              <small>axe-only strict scan</small>
-            </span>
-          </label>
-          <label class="mode-option">
-            <input type="radio" name="mode" value="deep" />
-            <span>
-              <strong>Deep</strong>
-              <small>axe + HTMLCS + ACE</small>
-            </span>
-          </label>
-        </fieldset>
-
-        <button id="scan-button" class="scan-button" type="button">
-          Scan Current Tab
-        </button>
-        <p id="status" class="status" role="status" aria-live="polite"></p>
+        <label class="terms-option">
+          <input id="accept-ai-terms" type="checkbox" />
+          <span>
+            I understand AI insights send redacted findings to A11y Garden's
+            server and OpenAI. Selectors and rule metadata are included; HTML
+            snippets are not.
+          </span>
+        </label>
       </section>
 
       <section id="last-result-card" class="card result-card" hidden aria-labelledby="last-result-title">
@@ -69,8 +91,12 @@
         </button>
       </section>
 
+      <button id="history-button" class="secondary-button" type="button">
+        Open Local History
+      </button>
+
       <p class="footnote">
-        Screenshots are intentionally omitted for extension scans in v1.
+        Shortcut: Alt+Shift+A. You can change it in Chrome extension shortcuts.
       </p>
     </main>
 

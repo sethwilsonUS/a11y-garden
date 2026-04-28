@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>A11y Garden Result</title>
+    <link rel="stylesheet" href="result.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="result.html" aria-label="A11y Garden local history">
+        <span class="brand-mark" aria-hidden="true">AG</span>
+        <span>A11y Garden</span>
+      </a>
+      <nav aria-label="Result actions">
+        <button id="history-nav" class="icon-button" type="button">History</button>
+      </nav>
+    </header>
+
+    <main id="app" class="app" tabindex="-1">
+      <section class="empty-state">
+        <p class="eyebrow">Loading</p>
+        <h1>Preparing your local result...</h1>
+      </section>
+    </main>
+
+    <template id="history-template">
+      <section class="page-heading">
+        <p class="eyebrow">Local History</p>
+        <h1>Your extension scans</h1>
+        <p class="lede">Results are stored in this browser only.</p>
+      </section>
+      <section id="history-list" class="history-list" aria-label="Saved audits"></section>
+    </template>
+
+    <script type="module" src="result.js"></script>
+  </body>
+</html>

@@ -1,9 +1,10 @@
 {
   "manifest_version": 3,
-  "name": "A11y Garden Live Scan",
-  "version": "0.1.0",
-  "description": "Scan the current tab with A11y Garden and open a private hosted result.",
-  "permissions": ["activeTab", "scripting", "storage", "tabs"],
+  "name": "A11y Garden",
+  "version": "0.2.0",
+  "description": "Scan the current tab with A11y Garden and view private results locally in Chrome.",
+  "permissions": ["activeTab", "scripting", "storage", "tabs", "unlimitedStorage"],
+  "optional_host_permissions": ["http://*/*", "https://*/*", "<all_urls>"],
   "host_permissions": [
     "https://a11ygarden.org/*",
     "https://www.a11ygarden.org/*",
@@ -15,24 +16,26 @@
     "type": "module"
   },
   "action": {
-    "default_title": "A11y Garden Live Scan",
+    "default_title": "A11y Garden",
     "default_popup": "popup.html"
   },
-  "content_scripts": [
-    {
-      "matches": [
-        "https://a11ygarden.org/results/*",
-        "https://www.a11ygarden.org/results/*",
-        "http://localhost:3000/results/*",
-        "http://127.0.0.1:3000/results/*"
-      ],
-      "js": ["a11y-garden-bridge.js"],
-      "run_at": "document_start"
+  "commands": {
+    "scan-current-tab": {
+      "suggested_key": {
+        "default": "Alt+Shift+A",
+        "mac": "Alt+Shift+A"
+      },
+      "description": "Scan the current tab with A11y Garden"
     }
-  ],
+  },
   "web_accessible_resources": [
     {
-      "resources": ["vendor/axe.min.js", "vendor/HTMLCS.js", "vendor/ace.js"],
+      "resources": [
+        "vendor/axe.min.js",
+        "vendor/HTMLCS.js",
+        "vendor/ace.js",
+        "vendor/fflate.mjs"
+      ],
       "matches": ["<all_urls>"]
     }
   ]

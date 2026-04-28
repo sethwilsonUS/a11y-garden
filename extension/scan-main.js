@@ -76,7 +76,7 @@
   };
 
   // Keep this heuristic broadly aligned with src/lib/platforms.ts so extension
-  // audits get the same framework/CMS affordances as web and CLI scans.
+  // audits get the same framework/CMS affordances as web scans.
   function detectPlatformFromHtml(rawHtml) {
     const html = String(rawHtml || "").toLowerCase();
 
@@ -789,14 +789,24 @@
     };
   }
 
+  function getEngineInjectionError(engine) {
+    const errors = window.__A11yGardenEngineInjectionErrors;
+    if (!Array.isArray(errors)) return "";
+    const match = errors.find((error) => error.engine === engine);
+    if (!match?.message) return "";
+    return `${match.file || engine}: ${match.message}`;
+  }
+
   function buildFailureSummary(engine, durationMs, error) {
+    const note = error instanceof Error ? error.message : "Unknown engine error";
+    const injectionError = getEngineInjectionError(engine);
     return {
       engine,
       status: "failed",
       durationMs,
       confirmedCount: 0,
       reviewCount: 0,
-      note: error instanceof Error ? error.message : "Unknown engine error",
+      note: injectionError ? `${note}. Injection error: ${injectionError}` : note,
     };
   }
 
@@ -860,7 +870,10 @@
       summaries.length > 0 &&
       summaries.every((summary) => summary.status === "failed")
     ) {
-      throw new Error("All accessibility engines failed");
+      const failureNotes = summaries
+        .map((summary) => `${summary.engine}: ${summary.note}`)
+        .join("; ");
+      throw new Error(`All accessibility engines failed: ${failureNotes}`);
     }
 
     const deduplicated = deduplicateFindings(findings);
