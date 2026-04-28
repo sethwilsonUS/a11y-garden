@@ -13,8 +13,12 @@ const filesToCopy: Array<[string, string]> = [
   ["popup.html", "popup.html"],
   ["popup.css", "popup.css"],
   ["popup.js", "popup.js"],
+  ["result.html", "result.html"],
+  ["result.css", "result.css"],
+  ["result.js", "result.js"],
+  ["shared.js", "shared.js"],
+  ["db.js", "db.js"],
   ["background.js", "background.js"],
-  ["a11y-garden-bridge.js", "a11y-garden-bridge.js"],
   ["scan-main.js", "scan-main.js"],
 ];
 
@@ -25,6 +29,7 @@ const vendorFiles: Array<[string, string]> = [
     "HTMLCS.js",
   ],
   [resolve(root, "node_modules/accessibility-checker-engine/ace.js"), "ace.js"],
+  [resolve(root, "node_modules/fflate/esm/browser.js"), "fflate.mjs"],
 ];
 
 rmSync(distRoot, { recursive: true, force: true });
