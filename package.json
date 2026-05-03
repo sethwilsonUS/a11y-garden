@@ -27,7 +27,7 @@
   },
   "dependencies": {
     "@axe-core/playwright": "^4.11.0",
-    "@clerk/nextjs": "^6.37.1",
+    "@clerk/nextjs": "^6.39.3",
     "@clerk/themes": "^2.4.51",
     "@pa11y/html_codesniffer": "^2.6.0",
     "@upstash/ratelimit": "^2.0.8",
