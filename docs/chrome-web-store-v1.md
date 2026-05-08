@@ -38,7 +38,7 @@ Official references:
 4. Static-check the packaged extension:
 
    ```bash
-   rg -n "fetch\\(|auth|Clerk|Convex|OpenAI|appOrigin|a11ygarden\\.org" extension/dist
+   rg -n -g '!extension/dist/vendor/**' "fetch\\(|auth|Clerk|Convex|OpenAI|appOrigin|a11ygarden\\.org" extension/dist
    ```
 
    Expected: no matches. The extension should not call A11y Garden servers.
@@ -61,9 +61,15 @@ npm run package:extension
 ```
 
 The script builds `extension/dist` and writes
-`extension/a11y-garden-v0.2.0.zip`. Upload that ZIP in the Chrome Web Store
+`extension/a11y-garden-v<version>.zip`, where `<version>` comes from
+`extension/dist/manifest.json`. Upload that ZIP in the Chrome Web Store
 Developer Dashboard. Do not zip the parent `extension/dist` folder itself; the
 ZIP root must contain `manifest.json`.
+
+The build copies the packaged scanner dependencies into
+`extension/dist/vendor/`, including axe-core, HTML_CodeSniffer, IBM ACE, and
+fflate. Load and upload `extension/dist` or the generated ZIP, not the source
+`extension/` directory.
 
 For every future upload, increment `version` in `extension/manifest.json`
 before packaging. Chrome requires each uploaded version to be higher than the
@@ -75,7 +81,8 @@ previous uploaded version.
    [Developer Dashboard](https://chrome.google.com/webstore/devconsole/). Google
    requires a one-time registration fee and a developer email.
 2. Click New item.
-3. Upload `extension/a11y-garden-v0.2.0.zip`.
+3. Upload `extension/a11y-garden-v<version>.zip`, matching the version in
+   `extension/dist/manifest.json`.
 4. Complete these tabs:
    - Store listing
    - Privacy
@@ -103,7 +110,9 @@ Use A11y Garden when you want quick accessibility evidence for a page you can al
 Privacy posture:
 - No account is required.
 - No scan result is uploaded by the extension.
-- Results, history, and exports stay in Chrome extension storage.
+- Results and history remain in Chrome extension storage.
+- Exports are downloaded to your device only when you choose a Markdown,
+  AGENTS.md, JSON, or ZIP download.
 - The extension does not capture screenshots.
 - Mobile clone scanning asks for temporary site access only when you enable that option.
 
@@ -172,11 +181,15 @@ Suggested answers for the v1 extension:
 - Data transfer to third parties: No extension scan data is transferred.
 - User data collected: disclose website content or web browsing activity if the
   dashboard treats scanned page URL/title/findings as collected data, even
-  though it is stored locally. The disclosure should say it is used only to
-  provide the scan/report feature.
+  though results and history are stored locally. The disclosure should say it is
+  used only to provide the scan/report feature. Exported Markdown, AGENTS.md,
+  JSON, and ZIP files are downloaded to the user's device only when the user
+  initiates the export.
 - Privacy policy URL: provide a public page that says:
   - scan URL, page title, findings, and local history are stored in Chrome
     extension storage;
+  - exported Markdown, AGENTS.md, JSON, and ZIP files are saved to the user's
+    device only when the user starts a download;
   - the extension does not capture screenshots;
   - the extension does not upload scan data;
   - users can delete local results from the result/history UI;
