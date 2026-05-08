@@ -23,14 +23,6 @@ const MOBILE_SCAN_VIEWPORT = {
   width: 390,
   height: 844,
 };
-const SCREENSHOT_SIZE_LIMITS = {
-  desktop: { maxWidth: 1440, maxHeight: 900 },
-  mobile: {
-    maxWidth: MOBILE_SCAN_VIEWPORT.width,
-    maxHeight: MOBILE_SCAN_VIEWPORT.height,
-  },
-  screenshot: { maxWidth: 1440, maxHeight: 900 },
-};
 const PENDING_MOBILE_SCAN_MAX_AGE_MS = 2 * 60 * 1000;
 let pendingMobileScanPromise = null;
 
@@ -58,80 +50,6 @@ function formatExtensionError(error, fallback = "Extension action failed.") {
   const withoutSourceDump = stripInjectedSourceDump(rawMessage);
   const message = withoutSourceDump || fallback;
   return truncateErrorMessage(message);
-}
-
-function screenshotLimitsForLabel(label) {
-  return SCREENSHOT_SIZE_LIMITS[label] || SCREENSHOT_SIZE_LIMITS.screenshot;
-}
-
-async function blobToDataUrl(blob) {
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  const chunkSize = 0x8000;
-  let binary = "";
-
-  for (let index = 0; index < bytes.length; index += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
-  }
-
-  return `data:${blob.type || "image/jpeg"};base64,${btoa(binary)}`;
-}
-
-function dataUrlToBlob(dataUrl) {
-  const match = String(dataUrl || "").match(/^data:([^;,]+)?(;base64)?,(.*)$/);
-  if (!match) throw new Error("Invalid screenshot data URL.");
-
-  const type = match[1] || "image/jpeg";
-  const isBase64 = Boolean(match[2]);
-  const payload = match[3] || "";
-  const binary = isBase64 ? atob(payload) : decodeURIComponent(payload);
-  const bytes = new Uint8Array(binary.length);
-
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-
-  return new Blob([bytes], { type });
-}
-
-async function resizeScreenshotDataUrl(dataUrl, label) {
-  const limits = screenshotLimitsForLabel(label);
-
-  if (
-    !dataUrl?.startsWith("data:image/") ||
-    typeof createImageBitmap !== "function" ||
-    typeof OffscreenCanvas === "undefined"
-  ) {
-    return dataUrl;
-  }
-
-  let bitmap;
-  try {
-    const imageBlob = dataUrlToBlob(dataUrl);
-    bitmap = await createImageBitmap(imageBlob);
-    const scale = Math.min(1, limits.maxWidth / bitmap.width, limits.maxHeight / bitmap.height);
-
-    if (scale >= 1) return dataUrl;
-
-    const width = Math.max(1, Math.round(bitmap.width * scale));
-    const height = Math.max(1, Math.round(bitmap.height * scale));
-    const canvas = new OffscreenCanvas(width, height);
-    const context = canvas.getContext("2d");
-
-    if (!context) return dataUrl;
-
-    context.drawImage(bitmap, 0, 0, width, height);
-    const resizedBlob = await canvas.convertToBlob({
-      type: "image/jpeg",
-      quality: 0.82,
-    });
-
-    return await blobToDataUrl(resizedBlob);
-  } catch (error) {
-    console.warn("[A11y Garden] Screenshot resize failed; using original image:", error);
-    return dataUrl;
-  } finally {
-    bitmap?.close?.();
-  }
 }
 
 function chromeCall(invoker) {
@@ -253,30 +171,6 @@ async function executeScanner(tabId, mode) {
   return result;
 }
 
-async function captureTabScreenshot(tab, label = "screenshot") {
-  if (!tab?.windowId) {
-    return {
-      dataUrl: null,
-      warning: `Chrome did not provide a window for the ${label} screenshot.`,
-    };
-  }
-
-  try {
-    const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
-      format: "jpeg",
-      quality: 82,
-    });
-    const resizedDataUrl = await resizeScreenshotDataUrl(dataUrl, label);
-    return { dataUrl: resizedDataUrl, warning: null };
-  } catch (error) {
-    console.warn("[A11y Garden] Screenshot capture failed:", error);
-    return {
-      dataUrl: null,
-      warning: `Chrome could not capture the ${label} screenshot: ${formatExtensionError(error, "Screenshot capture failed.")}`,
-    };
-  }
-}
-
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -313,7 +207,7 @@ function waitForTabComplete(tabId, timeoutMs = 20_000) {
   });
 }
 
-async function scanMobileClone(sourceTab, prefs) {
+async function scanMobileClone(sourceTab) {
   const allowed = await hasMobileScanPermission(sourceTab.url);
   if (!allowed) {
     throw new Error(
@@ -339,12 +233,6 @@ async function scanMobileClone(sourceTab, prefs) {
       ...scan,
       viewportWidth: scan.viewportWidth || MOBILE_SCAN_VIEWPORT.width,
       viewportHeight: scan.viewportHeight || MOBILE_SCAN_VIEWPORT.height,
-      ...(prefs.captureScreenshot
-        ? {
-            screenshotWarning:
-              "Mobile clone screenshots are omitted in the v1 lean-permissions mode. Desktop screenshots are still captured locally.",
-          }
-        : {}),
     };
   } finally {
     if (createdWindow?.id) {
@@ -367,7 +255,6 @@ function buildAuditRecord({ id, sourceTab, desktopScan, mobileScan, prefs }) {
     viewportMode: mobileScan ? "paired" : "live",
     settings: {
       mode: COMPREHENSIVE_SCAN_MODE,
-      captureScreenshot: prefs.captureScreenshot,
       includeMobile: prefs.includeMobile,
     },
     desktop: desktopScan,
@@ -475,24 +362,15 @@ async function runScan(input = {}, options = {}) {
   }
 
   const desktopScan = await executeScanner(tab.id, COMPREHENSIVE_SCAN_MODE);
-  const desktopScreenshot = prefs.captureScreenshot
-    ? await captureTabScreenshot(tab, "desktop")
-    : null;
-  const desktopWithScreenshot = {
-    ...desktopScan,
-    ...(desktopScreenshot?.dataUrl ? { screenshotDataUrl: desktopScreenshot.dataUrl } : {}),
-    ...(desktopScreenshot?.warning ? { screenshotWarning: desktopScreenshot.warning } : {}),
-  };
-
   const mobileScan = prefs.includeMobile
-    ? await scanMobileClone(tab, prefs)
+    ? await scanMobileClone(tab)
     : null;
 
   const auditId = crypto.randomUUID();
   const audit = buildAuditRecord({
     id: auditId,
     sourceTab: tab,
-    desktopScan: desktopWithScreenshot,
+    desktopScan,
     mobileScan,
     prefs,
   });

@@ -208,23 +208,6 @@ h3 {
   overflow-wrap: anywhere;
 }
 
-.screenshot-note {
-  background: #f7faf8;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  color: var(--muted);
-  line-height: 1.55;
-  padding: 14px 16px;
-}
-
-.screenshot-note p {
-  margin: 0;
-}
-
-.screenshot-note p + p {
-  margin-top: 8px;
-}
-
 .toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -528,27 +511,6 @@ code {
   padding: 2px 5px;
 }
 
-.screenshot {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  display: block;
-  height: auto;
-  margin-inline: auto;
-  max-height: min(58vh, 560px);
-  max-width: 100%;
-  object-fit: contain;
-}
-
-.screenshot-desktop {
-  width: min(100%, 960px);
-}
-
-.screenshot-mobile {
-  max-height: min(58vh, 520px);
-  max-width: min(100%, 320px);
-  width: auto;
-}
-
 .agent-note {
   background: #eef4fb;
   border: 1px solid rgba(52, 95, 145, 0.22);
@@ -702,8 +664,7 @@ code {
   }
 
   .severity-card,
-  .issue-section-empty,
-  .screenshot-note {
+  .issue-section-empty {
     background: #13251d;
   }
 
@@ -787,7 +748,4 @@ code {
     color: #d9f5e6;
   }
 
-  .screenshot {
-    border-color: var(--border);
-  }
 }

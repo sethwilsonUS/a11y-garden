@@ -14,9 +14,8 @@ A11y Garden servers.
 - Unpacked extension install
 - Local result tabs and local history
 - Local multi-engine scans with axe-core, HTML_CodeSniffer, and IBM ACE
-- Optional screenshot capture
 - Optional 390x844 mobile clone scan
-- Markdown, AGENTS.md, JSON, screenshot, and ZIP exports
+- Markdown, AGENTS.md, JSON, and ZIP exports
 - Agent-ready fix guidance in local results and Markdown/AGENTS.md exports
 
 Current non-goals:
@@ -54,8 +53,8 @@ Then click **Reload** for the unpacked extension in `chrome://extensions`.
 ## Agent Fix Guidance
 
 Use the local Markdown report or AGENTS.md export as input for a coding agent.
-The extension does not upload scan results, screenshots, selectors, rule
-metadata, or history.
+The extension does not upload scan results, selectors, rule metadata, or
+history.
 
 ## Chrome Web Store Release
 
@@ -99,8 +98,8 @@ You need both steps:
 1. Rebuild with `npm run build:extension`
 2. Reload the unpacked extension in `chrome://extensions`
 
-### Why is there no mobile screenshot when screenshot capture is enabled?
+### Does the extension capture screenshots?
 
-The v1 extension uses lean permissions. It captures the current tab screenshot
-locally, but mobile clone screenshots are omitted so the extension does not need
-all-sites screenshot access.
+No. The v1 extension intentionally avoids screenshot capture so reports do not
+store sensitive page pixels. The result data is based on local scanner output
+from the page you explicitly scan.

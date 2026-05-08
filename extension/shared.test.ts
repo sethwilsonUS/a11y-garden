@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  DEFAULT_PREFS,
   buildAgentPlanMarkdown,
   buildMarkdownReport,
   mobileScanPermissionPattern,
@@ -83,7 +84,7 @@ const sampleAudit = {
 };
 
 describe("extension shared v1 helpers", () => {
-  it("drops legacy AI and server preference fields when normalizing prefs", () => {
+  it("drops legacy AI, server, and screenshot preference fields when normalizing prefs", () => {
     const prefs = normalizePrefs({
       appOrigin: "https://a11ygarden.org",
       aiInsights: true,
@@ -94,15 +95,16 @@ describe("extension shared v1 helpers", () => {
 
     expect(prefs).toEqual({
       mode: "deep",
-      captureScreenshot: true,
       includeMobile: true,
     });
+    expect(DEFAULT_PREFS).not.toHaveProperty("captureScreenshot");
+    expect(prefs).not.toHaveProperty("captureScreenshot");
   });
 
-  it("keeps mobile scan permission requests origin-scoped even when screenshots are enabled", () => {
+  it("keeps mobile scan permission requests origin-scoped", () => {
     expect(
       mobileScanPermissionPattern(
-        { captureScreenshot: true },
+        {},
         "https://example.com/products",
       ),
     ).toBe("https://example.com/*");

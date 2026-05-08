@@ -4,7 +4,6 @@ export const PENDING_MOBILE_SCAN_KEY = "a11yGardenPendingMobileScan";
 
 export const DEFAULT_PREFS = {
   mode: "deep",
-  captureScreenshot: false,
   includeMobile: false,
 };
 
@@ -15,7 +14,6 @@ export function normalizePrefs(value) {
 
   return {
     mode: "deep",
-    captureScreenshot: prefs.captureScreenshot === true,
     includeMobile: prefs.includeMobile === true,
   };
 }
