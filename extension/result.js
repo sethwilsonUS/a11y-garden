@@ -57,16 +57,6 @@ function downloadText(text, filename, type = "text/markdown") {
   downloadBlob(new Blob([text], { type }), filename);
 }
 
-function dataUrlToBytes(dataUrl) {
-  const [, payload = ""] = String(dataUrl).split(",");
-  const binary = atob(payload);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-  return bytes;
-}
-
 function renderSeverityCards(counts, ariaLabel = "Findings by severity") {
   const normalized = normalizeCounts(counts);
   return `
@@ -281,25 +271,6 @@ function renderFindingList(title, findings) {
   `;
 }
 
-function renderScreenshot(scan, label, viewport = "desktop") {
-  if (!scan?.screenshotDataUrl) {
-    return `
-      <div class="screenshot-note" role="note">
-        <p>No ${escapeHtml(label.toLowerCase())} screenshot was captured for this scan.</p>
-        ${scan?.screenshotWarning ? `<p>${escapeHtml(scan.screenshotWarning)}</p>` : ""}
-      </div>
-    `;
-  }
-  const screenshotClass = viewport === "mobile" ? "screenshot-mobile" : "screenshot-desktop";
-  return `
-    <img
-      class="screenshot ${screenshotClass}"
-      src="${escapeHtml(scan.screenshotDataUrl)}"
-      alt="${escapeHtml(label)} screenshot captured during the extension scan"
-    />
-  `;
-}
-
 function renderScan(audit, viewport) {
   const scan = viewport === "mobile" ? audit.mobile : audit.desktop;
   const confirmed = getConfirmedFindings(scan);
@@ -340,11 +311,6 @@ function renderScan(audit, viewport) {
         These items should be manually reviewed before treating them as confirmed defects.
       </p>
       ${renderFindingList("Needs Review", review)}
-    </section>
-
-    <section class="panel">
-      <h2>${label} Screenshot</h2>
-      ${renderScreenshot(scan, label, viewport)}
     </section>
   `;
 }
@@ -415,7 +381,7 @@ async function renderResult(audit, activeViewport = "desktop") {
         <section class="panel">
           <h2>Privacy</h2>
           <p class="muted">
-            Core scan data, history, screenshots, and exports live in Chrome extension storage.
+            Core scan data, history, and exports live in Chrome extension storage.
             This v1 extension does not upload scan data or call A11y Garden servers.
           </p>
         </section>
@@ -446,14 +412,8 @@ function wireResultActions(audit, viewport) {
     const files = {
       "a11y-report.md": strToU8(buildMarkdownReport(audit)),
       "AGENTS.md": strToU8(buildAgentPlanMarkdown(audit)),
-      "audit.json": strToU8(JSON.stringify(redactAuditForJson(audit), null, 2)),
+      "audit.json": strToU8(JSON.stringify(audit, null, 2)),
     };
-    if (audit.desktop?.screenshotDataUrl) {
-      files["desktop-screenshot.jpg"] = dataUrlToBytes(audit.desktop.screenshotDataUrl);
-    }
-    if (audit.mobile?.screenshotDataUrl) {
-      files["mobile-screenshot.jpg"] = dataUrlToBytes(audit.mobile.screenshotDataUrl);
-    }
     const zipped = zipSync(files);
     downloadBlob(new Blob([zipped], { type: "application/zip" }), `${filenameBase}-a11y-garden.zip`);
   });
@@ -477,18 +437,6 @@ function wireResultActions(audit, viewport) {
       target?.focus({ preventScroll: true });
     });
   }
-}
-
-function redactAuditForJson(audit) {
-  return {
-    ...audit,
-    desktop: audit.desktop
-      ? { ...audit.desktop, screenshotDataUrl: audit.desktop.screenshotDataUrl ? "[stored in ZIP]" : undefined }
-      : undefined,
-    mobile: audit.mobile
-      ? { ...audit.mobile, screenshotDataUrl: audit.mobile.screenshotDataUrl ? "[stored in ZIP]" : undefined }
-      : undefined,
-  };
 }
 
 async function renderHistory() {

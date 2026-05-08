@@ -17,7 +17,6 @@ const lastResultCardEl = document.getElementById("last-result-card");
 const lastResultNameEl = document.getElementById("last-result-name");
 const lastResultSummaryEl = document.getElementById("last-result-summary");
 const openResultButton = document.getElementById("open-result-button");
-const captureScreenshotInput = document.getElementById("capture-screenshot");
 const includeMobileInput = document.getElementById("include-mobile");
 let activeTabSnapshot = null;
 let pendingPermissionRequest = null;
@@ -112,23 +111,17 @@ function resetPermissionPreflight() {
   scanButton.textContent = "Scan Current Tab";
 }
 
-function mobilePermissionPreflightMessage(prefs) {
-  if (prefs.captureScreenshot) {
-    return "Chrome will ask for temporary read access to this site so the mobile clone can be scanned locally. Desktop screenshots stay local; mobile clone screenshots are omitted in v1 lean-permissions mode.";
-  }
-
+function mobilePermissionPreflightMessage() {
   return "Chrome will ask for temporary read access to this site so the mobile clone can be scanned locally. The wording says \"change,\" but A11y Garden does not edit the site.";
 }
 
 function currentPrefs() {
   return normalizePrefs({
-    captureScreenshot: captureScreenshotInput.checked,
     includeMobile: includeMobileInput.checked,
   });
 }
 
 function setControlsFromPrefs(prefs) {
-  captureScreenshotInput.checked = prefs.captureScreenshot;
   includeMobileInput.checked = prefs.includeMobile;
 }
 
@@ -174,10 +167,7 @@ async function loadPopupState() {
   }
 }
 
-for (const control of [
-  captureScreenshotInput,
-  includeMobileInput,
-]) {
+for (const control of [includeMobileInput]) {
   control.addEventListener("change", () => {
     resetPermissionPreflight();
     persistPrefs().catch(() => {});
@@ -203,7 +193,7 @@ scanButton.addEventListener("click", async () => {
       if (!hasPermission && pendingPermissionRequest?.sourceUrl !== sourceUrl) {
         pendingPermissionRequest = { sourceUrl };
         scanButton.textContent = "Grant Access & Scan";
-        setStatus(mobilePermissionPreflightMessage(prefs));
+        setStatus(mobilePermissionPreflightMessage());
         return;
       }
 

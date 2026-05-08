@@ -3,7 +3,7 @@
   "name": "A11y Garden",
   "version": "0.2.0",
   "description": "Scan the current tab with A11y Garden and view private results locally in Chrome.",
-  "permissions": ["activeTab", "scripting", "storage", "tabs", "unlimitedStorage"],
+  "permissions": ["activeTab", "scripting", "storage"],
   "optional_host_permissions": ["http://*/*", "https://*/*"],
   "icons": {
     "16": "icons/icon-16.png",

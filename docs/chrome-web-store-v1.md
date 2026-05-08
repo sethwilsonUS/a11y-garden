@@ -50,7 +50,7 @@ Official references:
    - Select `extension/dist`.
    - Scan a normal `http(s)` page.
    - Verify the local result tab opens and exports Markdown, AGENTS.md, JSON,
-     desktop screenshot, and ZIP files.
+     and ZIP files.
 
 ## 2. Build The Upload ZIP
 
@@ -88,7 +88,7 @@ previous uploaded version.
 Suggested short description:
 
 ```text
-Run local accessibility scans on the current tab and export Markdown, AGENTS.md, JSON, and screenshot reports.
+Run local accessibility scans on the current tab and export Markdown, AGENTS.md, JSON, and ZIP reports.
 ```
 
 Suggested detailed description:
@@ -96,14 +96,15 @@ Suggested detailed description:
 ```text
 A11y Garden scans the page you are already viewing and keeps the result local to your browser.
 
-The extension runs axe-core, HTML_CodeSniffer, and IBM ACE in Chrome, then opens a local result tab with confirmed findings, needs-review signals, engine coverage, optional desktop screenshots, and export tools.
+The extension runs axe-core, HTML_CodeSniffer, and IBM ACE in Chrome, then opens a local result tab with confirmed findings, needs-review signals, engine coverage, and export tools.
 
-Use A11y Garden when you want quick accessibility evidence for a page you can already access, including signed-in app screens and local development work. Reports can be exported as Markdown, AGENTS.md, audit JSON, screenshots, or a ZIP bundle so you can hand the findings to a coding agent or developer.
+Use A11y Garden when you want quick accessibility evidence for a page you can already access, including signed-in app screens and local development work. Reports can be exported as Markdown, AGENTS.md, audit JSON, or a ZIP bundle so you can hand the findings to a coding agent or developer.
 
 Privacy posture:
 - No account is required.
 - No scan result is uploaded by the extension.
-- Results, history, screenshots, and exports stay in Chrome extension storage.
+- Results, history, and exports stay in Chrome extension storage.
+- The extension does not capture screenshots.
 - Mobile clone scanning asks for temporary site access only when you enable that option.
 
 Automated accessibility checks are useful signals, not a complete WCAG audit. Always verify important fixes with keyboard testing, browser accessibility tooling, and screen reader checks where possible.
@@ -131,8 +132,8 @@ Recommended screenshot set:
 3. Expanded finding details showing rule ID, selector, WCAG metadata, and rule
    reference.
 4. Fix with an agent panel next to the local privacy note.
-5. ZIP contents in Finder showing `a11y-report.md`, `AGENTS.md`, `audit.json`,
-   and `desktop-screenshot.jpg`.
+5. ZIP contents in Finder showing `a11y-report.md`, `AGENTS.md`, and
+   `audit.json`.
 
 Screenshot capture workflow:
 
@@ -170,12 +171,13 @@ Suggested answers for the v1 extension:
 - Data sale/ads: No.
 - Data transfer to third parties: No extension scan data is transferred.
 - User data collected: disclose website content or web browsing activity if the
-  dashboard treats scanned page URL/title/findings/screenshots as collected
-  data, even though it is stored locally. The disclosure should say it is used
-  only to provide the scan/report feature.
+  dashboard treats scanned page URL/title/findings as collected data, even
+  though it is stored locally. The disclosure should say it is used only to
+  provide the scan/report feature.
 - Privacy policy URL: provide a public page that says:
-  - scan URL, page title, findings, local history, and optional screenshots are
-    stored in Chrome extension storage;
+  - scan URL, page title, findings, and local history are stored in Chrome
+    extension storage;
+  - the extension does not capture screenshots;
   - the extension does not upload scan data;
   - users can delete local results from the result/history UI;
   - data is not sold, used for ads, or transferred to third parties;
@@ -189,11 +191,8 @@ Permission justifications:
 - `activeTab`: grants temporary access to the page the user explicitly scans.
 - `scripting`: injects packaged accessibility scanner scripts into the active
   tab or temporary mobile clone.
-- `storage`: saves preferences and last-result metadata locally in Chrome.
-- `unlimitedStorage`: keeps local scan history, screenshots, and export-ready
-  audit data without small quota failures.
-- `tabs`: reads the current tab URL/title, opens local result/history tabs, and
-  creates the optional temporary mobile clone tab.
+- `storage`: saves preferences, last-result metadata, and local scan history in
+  Chrome extension storage/IndexedDB.
 - Optional `http://*/*` and `https://*/*`: requested only when the user enables
   the mobile clone scan, so the extension can scan that same site in a temporary
   390x844 window.
@@ -211,8 +210,7 @@ No account or server setup is required.
 4. Click Scan Current Tab.
 5. A local chrome-extension:// result tab should open.
 6. Verify Download Markdown, Download AGENTS.md, Download ZIP, and Open Local History.
-7. Optional: enable Capture screenshot before scanning to verify a desktop screenshot is stored locally.
-8. Optional: enable Mobile clone, approve Chrome's temporary site-access prompt, and verify the 390x844 scan result appears.
+7. Optional: enable Mobile clone, approve Chrome's temporary site-access prompt, and verify the 390x844 scan result appears.
 
 The extension is intentionally local-only. It does not require sign-in and does not call A11y Garden servers.
 ```
@@ -239,9 +237,8 @@ The extension is intentionally local-only. It does not require sign-in and does 
 - [ ] `extension/dist/manifest.json` has no server host permissions
 - [ ] Packaged source has no server/auth calls
 - [ ] Unpacked extension scans a normal page
-- [ ] Desktop screenshot works when enabled
 - [ ] Mobile clone scan works after temporary site-access approval
-- [ ] Markdown, AGENTS.md, JSON, desktop screenshot, and ZIP exports work
+- [ ] Markdown, AGENTS.md, JSON, and ZIP exports work
 - [ ] Store screenshots are cropped/exported to 1280x800
 - [ ] Small promo tile is 440x280
 - [ ] Privacy policy page is public and matches the v1 behavior
