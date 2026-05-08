@@ -1,35 +1,22 @@
-export const DEFAULT_APP_ORIGIN = "https://a11ygarden.org";
 export const PREFS_KEY = "a11yGardenPrefs";
 export const LAST_RESULT_KEY = "a11yGardenLastResult";
 export const PENDING_MOBILE_SCAN_KEY = "a11yGardenPendingMobileScan";
-export const ALL_URLS_PERMISSION = "<all_urls>";
 
 export const DEFAULT_PREFS = {
-  appOrigin: DEFAULT_APP_ORIGIN,
   mode: "deep",
   captureScreenshot: false,
   includeMobile: false,
-  aiInsights: false,
-  acceptedAiTermsAt: null,
 };
 
 export const SEVERITIES = ["critical", "serious", "moderate", "minor"];
 
 export function normalizePrefs(value) {
   const prefs = value && typeof value === "object" ? value : {};
-  const appOrigin =
-    typeof prefs.appOrigin === "string" && prefs.appOrigin.trim()
-      ? prefs.appOrigin.trim().replace(/\/$/, "")
-      : DEFAULT_APP_ORIGIN;
 
   return {
-    appOrigin,
     mode: "deep",
     captureScreenshot: prefs.captureScreenshot === true,
     includeMobile: prefs.includeMobile === true,
-    aiInsights: prefs.aiInsights === true,
-    acceptedAiTermsAt:
-      typeof prefs.acceptedAiTermsAt === "number" ? prefs.acceptedAiTermsAt : null,
   };
 }
 
@@ -43,7 +30,7 @@ export function originPermissionPattern(url) {
 }
 
 export function mobileScanPermissionPattern(prefs, url) {
-  return prefs?.captureScreenshot ? ALL_URLS_PERMISSION : originPermissionPattern(url);
+  return originPermissionPattern(url);
 }
 
 export function emptyCounts() {
@@ -160,71 +147,6 @@ export function severityLabel(severity) {
   return String(severity || "minor").charAt(0).toUpperCase() + String(severity || "minor").slice(1);
 }
 
-export function buildRedactedFindings(scan) {
-  return parseFindings(scan?.rawFindings).map((finding) => ({
-    id: String(finding?.id || "unknown-rule"),
-    dedupKey: typeof finding?.dedupKey === "string" ? finding.dedupKey : undefined,
-    disposition:
-      finding?.disposition === "needs-review" ? "needs-review" : "confirmed",
-    impact: SEVERITIES.includes(finding?.impact) ? finding.impact : "minor",
-    help: String(finding?.help || finding?.description || finding?.id || "Accessibility finding"),
-    description: String(finding?.description || finding?.help || finding?.id || ""),
-    helpUrl: typeof finding?.helpUrl === "string" ? finding.helpUrl : undefined,
-    engines: Array.isArray(finding?.engines) ? finding.engines.map(String) : [],
-    wcagCriteria: Array.isArray(finding?.wcagCriteria)
-      ? finding.wcagCriteria.map(String)
-      : [],
-    wcagTags: Array.isArray(finding?.wcagTags) ? finding.wcagTags.map(String) : [],
-    totalNodes: getFindingNodeCount(finding),
-    nodes: (Array.isArray(finding?.nodes) ? finding.nodes : [])
-      .slice(0, 5)
-      .map((node) => ({
-        selector:
-          typeof node?.selector === "string" && node.selector
-            ? node.selector
-            : Array.isArray(node?.target)
-              ? node.target.join(" ")
-              : "document",
-      })),
-  }));
-}
-
-export function buildAiPayload(audit) {
-  const desktop = audit?.desktop || null;
-  const mobile = audit?.mobile || null;
-  return {
-    auditId: audit?.id,
-    url: getAuditUrl(audit),
-    pageTitle: getAuditTitle(audit),
-    scannedAt: audit?.scannedAt,
-    scanMode: audit?.scanMode || desktop?.scanMode,
-    viewportMode: audit?.viewportMode || "live",
-    engineProfile: desktop?.engineProfile || "strict",
-    platform: audit?.platform || desktop?.platform,
-    acceptedTerms: true,
-    desktop: desktop
-      ? {
-          viewport: "desktop",
-          viewportWidth: desktop.viewportWidth,
-          viewportHeight: desktop.viewportHeight,
-          violations: normalizeCounts(desktop.violations),
-          reviewViolations: normalizeCounts(desktop.reviewViolations),
-          findings: buildRedactedFindings(desktop),
-        }
-      : null,
-    mobile: mobile
-      ? {
-          viewport: "mobile",
-          viewportWidth: mobile.viewportWidth,
-          viewportHeight: mobile.viewportHeight,
-          violations: normalizeCounts(mobile.violations),
-          reviewViolations: normalizeCounts(mobile.reviewViolations),
-          findings: buildRedactedFindings(mobile),
-        }
-      : null,
-  };
-}
-
 export function buildMarkdownReport(audit) {
   const title = getAuditTitle(audit);
   const url = getAuditUrl(audit);
@@ -239,28 +161,36 @@ export function buildMarkdownReport(audit) {
     "",
   ];
 
+  lines.push(...renderAgentWorkflow());
+  lines.push("", "---", "");
+
   lines.push(...renderScanSection("Desktop / current tab", audit.desktop));
   if (audit.mobile) {
     lines.push("", "---", "");
     lines.push(...renderScanSection("Mobile clone (390x844)", audit.mobile));
   }
 
-  if (audit.aiSummary) {
-    lines.push("", "---", "", "## AI Summary", "", audit.aiSummary, "");
-    if (Array.isArray(audit.topIssues) && audit.topIssues.length > 0) {
-      lines.push("## Top Issues", "");
-      audit.topIssues.forEach((issue, index) => {
-        lines.push(`${index + 1}. ${issue}`);
-      });
-      lines.push("");
-    }
-    if (audit.platformTip) {
-      lines.push("## Platform Tip", "", audit.platformTip, "");
-    }
-  }
-
   lines.push("", "---", "", "Report generated by A11y Garden.");
   return `${lines.join("\n").trim()}\n`;
+}
+
+function renderAgentWorkflow() {
+  return [
+    "## Fix with an agent",
+    "",
+    "Suggested prompt:",
+    "",
+    "> Follow the accessibility fix guidance in this report. Prioritize confirmed findings by severity, treat needs-review findings as manual verification tasks, make the smallest durable source changes, and rerun the A11y Garden extension scan.",
+    "",
+    "Workflow:",
+    "",
+    "1. Start with critical and serious confirmed findings.",
+    "2. Use selectors, node counts, WCAG criteria, engine names, and rule references as evidence, not as source-code locations.",
+    "3. Locate the component or template that renders each selector and fix the source.",
+    "4. Verify keyboard behavior, accessible names, roles, focus states, and visible labels manually.",
+    "5. Rerun the extension scan and compare the new report with this one.",
+    "",
+  ];
 }
 
 function renderScanSection(label, scan) {
@@ -301,15 +231,32 @@ function renderScanSection(label, scan) {
 function renderFindingsList(heading, findings) {
   if (!findings.length) return [];
   const lines = [`### ${heading}`, ""];
+  if (heading === "Needs Review") {
+    lines.push(
+      "These findings came from lower-confidence or manual-review signals. Verify them before changing code.",
+      "",
+    );
+  }
   for (const severity of SEVERITIES) {
     const items = findings.filter((finding) => finding.impact === severity);
     if (!items.length) continue;
     lines.push(`#### ${severityLabel(severity)}`, "");
     for (const finding of items) {
       const count = getFindingNodeCount(finding);
-      lines.push(
-        `- **${finding.help || finding.id}** (\`${finding.id}\`) - ${count} affected node${count === 1 ? "" : "s"}; selector: \`${getPrimarySelector(finding)}\``,
-      );
+      const engines = Array.isArray(finding.engines)
+        ? finding.engines.map(formatEngineName).join(", ")
+        : "unknown";
+      const criteria = Array.isArray(finding.wcagCriteria) && finding.wcagCriteria.length
+        ? finding.wcagCriteria.join(", ")
+        : "not mapped";
+      const tags = Array.isArray(finding.wcagTags) && finding.wcagTags.length
+        ? `; Tags: ${finding.wcagTags.join(", ")}`
+        : "";
+      lines.push(`- **${finding.help || finding.id}** (\`${finding.id}\`)`);
+      lines.push(`  - Impact: ${severityLabel(finding.impact)}; ${count} affected node${count === 1 ? "" : "s"}; selector: \`${getPrimarySelector(finding)}\``);
+      lines.push(`  - Engines: ${engines}; WCAG: ${criteria}${tags}`);
+      if (finding.description) lines.push(`  - Context: ${finding.description}`);
+      if (finding.helpUrl) lines.push(`  - Reference: ${finding.helpUrl}`);
     }
     lines.push("");
   }
@@ -323,6 +270,16 @@ export function buildAgentPlanMarkdown(audit) {
       viewport: "desktop/current tab",
     })),
     ...getConfirmedFindings(audit.mobile).map((finding) => ({
+      ...finding,
+      viewport: "mobile clone",
+    })),
+  ].sort((left, right) => SEVERITIES.indexOf(left.impact) - SEVERITIES.indexOf(right.impact));
+  const review = [
+    ...getReviewFindings(audit.desktop).map((finding) => ({
+      ...finding,
+      viewport: "desktop/current tab",
+    })),
+    ...getReviewFindings(audit.mobile).map((finding) => ({
       ...finding,
       viewport: "mobile clone",
     })),
@@ -343,8 +300,13 @@ export function buildAgentPlanMarkdown(audit) {
     `- Audit date: ${new Date(audit.scannedAt).toISOString().split("T")[0]}`,
     `- Detected platform: ${platform}`,
     `- Confirmed findings: ${confirmed.length}`,
+    `- Needs-review signals: ${review.length}`,
     "",
-    "Use the rendered selectors as evidence. Find the source components that produce the markup, make the smallest durable fix, then re-run the extension scan.",
+    "Follow this plan to fix accessibility findings from the local report. Use rendered selectors as evidence, find the source components that produce the markup, make the smallest durable fix, then re-run the extension scan.",
+    "",
+    "Suggested prompt for a coding agent:",
+    "",
+    "> Follow this AGENTS.md fix plan. Work through confirmed findings by severity first, verify needs-review signals manually, keep changes minimal, and report which findings were fixed plus which require human review.",
     "",
   ];
 
@@ -360,8 +322,15 @@ export function buildAgentPlanMarkdown(audit) {
       const engines = Array.isArray(finding.engines)
         ? finding.engines.map(formatEngineName).join(", ")
         : "unknown";
+      const criteria = Array.isArray(finding.wcagCriteria) && finding.wcagCriteria.length
+        ? finding.wcagCriteria.join(", ")
+        : "not mapped";
+      const tags = Array.isArray(finding.wcagTags) && finding.wcagTags.length
+        ? `; tags: ${finding.wcagTags.join(", ")}`
+        : "";
       lines.push(`- Find the source that renders \`${selectors[0] || "document"}\` and fix **${finding.help || finding.id}**.`);
       lines.push(`  Rule: \`${finding.id}\`; viewport: ${finding.viewport}; engines: ${engines}.`);
+      lines.push(`  WCAG: ${criteria}${tags}.`);
       if (finding.description) lines.push(`  Context: ${finding.description}`);
       if (selectors.length > 1) {
         lines.push(`  Also verify selectors: ${selectors.slice(1).map((selector) => `\`${selector}\``).join(", ")}.`);
@@ -373,6 +342,35 @@ export function buildAgentPlanMarkdown(audit) {
 
   if (!confirmed.length) {
     lines.push("## Fixes", "", "No confirmed automated violations were found. Review any manual-review findings in the report before changing code.", "");
+  }
+
+  if (review.length) {
+    lines.push(
+      "## Needs Review Signals",
+      "",
+      "Verify these before changing code. They may indicate real defects, but they are not treated as confirmed automated violations.",
+      "",
+    );
+    for (const severity of SEVERITIES) {
+      const items = review.filter((finding) => finding.impact === severity);
+      if (!items.length) continue;
+      lines.push(`### ${severityLabel(severity)}`, "");
+      for (const finding of items) {
+        const selector = getPrimarySelector(finding);
+        const engines = Array.isArray(finding.engines)
+          ? finding.engines.map(formatEngineName).join(", ")
+          : "unknown";
+        const criteria = Array.isArray(finding.wcagCriteria) && finding.wcagCriteria.length
+          ? finding.wcagCriteria.join(", ")
+          : "not mapped";
+        lines.push(`- Verify \`${finding.id}\` for \`${selector}\`.`);
+        lines.push(`  Help: ${finding.help || finding.description || finding.id}.`);
+        lines.push(`  Viewport: ${finding.viewport}; engines: ${engines}; WCAG: ${criteria}.`);
+        if (finding.description) lines.push(`  Context: ${finding.description}`);
+        if (finding.helpUrl) lines.push(`  Reference: ${finding.helpUrl}`);
+      }
+      lines.push("");
+    }
   }
 
   lines.push(

@@ -20,6 +20,7 @@
 # production
 /build
 /extension/dist
+/extension/*.zip
 
 # misc
 .DS_Store

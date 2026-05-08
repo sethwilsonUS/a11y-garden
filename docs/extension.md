@@ -5,7 +5,8 @@ the current `http(s)` tab, stores the result locally in Chrome extension
 IndexedDB, and opens a `chrome-extension://` result tab.
 
 Core scans do not require an A11y Garden account or network access after the
-scanner assets are installed. AI insights are optional and require sign-in.
+scanner assets are installed. The v1 extension is local-only and does not call
+A11y Garden servers.
 
 ## Current Scope
 
@@ -16,14 +17,13 @@ scanner assets are installed. AI insights are optional and require sign-in.
 - Optional screenshot capture
 - Optional 390x844 mobile clone scan
 - Markdown, AGENTS.md, JSON, screenshot, and ZIP exports
-- Authenticated AI insights through `a11ygarden.org`
+- Agent-ready fix guidance in local results and Markdown/AGENTS.md exports
 
 Current non-goals:
 
-- Chrome Web Store distribution
 - Safari or Firefox extension builds
 - Public upload/share from extension results
-- BYOK AI keys
+- Extension account sync, hosted analysis, or remote processing
 
 ## Install and Build
 
@@ -51,26 +51,30 @@ npm run build:extension
 
 Then click **Reload** for the unpacked extension in `chrome://extensions`.
 
-## AI Insights
+## Agent Fix Guidance
 
-AI is off by default. To use it:
+Use the local Markdown report or AGENTS.md export as input for a coding agent.
+The extension does not upload scan results, screenshots, selectors, rule
+metadata, or history.
 
-1. Open the extension popup.
-2. Enable AI requests.
-3. Accept the AI terms.
-4. Sign in at `/extension/auth` on the configured A11y Garden origin.
-5. Generate AI insights from a local result tab.
+## Chrome Web Store Release
 
-The extension sends redacted findings only: rule IDs, severity, descriptions,
-WCAG metadata, node counts, and selectors. It does not send screenshots or HTML
-snippets.
+Build the upload ZIP:
+
+```bash
+npm run package:extension
+```
+
+The package is written to `extension/a11y-garden-v<version>.zip` with
+`manifest.json` at the ZIP root. The full release checklist and submission
+instructions live in `docs/chrome-web-store-v1.md`.
 
 ## Files That Matter
 
 - `extension/manifest.json` - permissions, popup, commands, service worker
 - `extension/background.js` - active-tab scan flow and local result creation
 - `extension/db.js` - IndexedDB storage helpers
-- `extension/shared.js` - grading, redaction, report, and AGENTS.md helpers
+- `extension/shared.js` - grading, report, and AGENTS.md helpers
 - `extension/result.html` / `result.js` / `result.css` - local result UI
 - `extension/popup.html` / `popup.js` / `popup.css` - popup controls
 - `extension/scan-main.js` - in-page scan runtime and finding normalization
@@ -95,12 +99,8 @@ You need both steps:
 1. Rebuild with `npm run build:extension`
 2. Reload the unpacked extension in `chrome://extensions`
 
-### Why did AI insights fail?
+### Why is there no mobile screenshot when screenshot capture is enabled?
 
-Check these in order:
-
-- You are signed in on the configured A11y Garden origin
-- AI requests are enabled in the popup
-- The AI terms checkbox is accepted
-- The server has `OPENAI_API_KEY` configured
-- The request has not hit the authenticated rate limit
+The v1 extension uses lean permissions. It captures the current tab screenshot
+locally, but mobile clone screenshots are omitted so the extension does not need
+all-sites screenshot access.
