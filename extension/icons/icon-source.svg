@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-labelledby="title">
+  <title>A11y Garden icon</title>
+  <rect x="16" y="16" width="96" height="96" rx="22" fill="#0f6b4d"/>
+  <path d="M64 34c13 0 23 10 23 23 0 15-12 28-23 41-11-13-23-26-23-41 0-13 10-23 23-23Z" fill="#eef8f2"/>
+  <circle cx="64" cy="57" r="9" fill="#0f6b4d"/>
+  <path d="M45 82c13 3 25 3 38 0" fill="none" stroke="#62d59e" stroke-width="8" stroke-linecap="round"/>
+  <path d="M51 92c8 2 18 2 26 0" fill="none" stroke="#62d59e" stroke-width="6" stroke-linecap="round"/>
+</svg>

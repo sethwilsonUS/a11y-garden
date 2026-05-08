@@ -1,7 +1,6 @@
 /* global chrome */
 
 import {
-  ALL_URLS_PERMISSION,
   DEFAULT_PREFS,
   PENDING_MOBILE_SCAN_KEY,
   isScannableUrl,
@@ -9,7 +8,6 @@ import {
   normalizePrefs,
 } from "./shared.js";
 
-const appOriginInput = document.getElementById("app-origin");
 const statusEl = document.getElementById("status");
 const scanButton = document.getElementById("scan-button");
 const historyButton = document.getElementById("history-button");
@@ -21,8 +19,6 @@ const lastResultSummaryEl = document.getElementById("last-result-summary");
 const openResultButton = document.getElementById("open-result-button");
 const captureScreenshotInput = document.getElementById("capture-screenshot");
 const includeMobileInput = document.getElementById("include-mobile");
-const aiInsightsInput = document.getElementById("ai-insights");
-const acceptAiTermsInput = document.getElementById("accept-ai-terms");
 let activeTabSnapshot = null;
 let pendingPermissionRequest = null;
 
@@ -62,10 +58,6 @@ function formatPopupError(error, fallback = "Scan failed.") {
   return message || fallback;
 }
 
-function isAllUrlsPermission(permissionOrigin) {
-  return permissionOrigin === ALL_URLS_PERMISSION;
-}
-
 async function requestMobileOriginPermission(url, prefs) {
   if (!isScannableUrl(url)) {
     throw new Error("Open a regular http(s) page before scanning.");
@@ -85,8 +77,7 @@ async function hasMobileOriginPermission(url, prefs) {
   }
 
   const origin = mobileScanPermissionPattern(prefs, url);
-  if (await hasPermissionOrigin(origin)) return true;
-  return !isAllUrlsPermission(origin) && await hasPermissionOrigin(ALL_URLS_PERMISSION);
+  return await hasPermissionOrigin(origin);
 }
 
 function buildPendingMobileScan(prefs, url) {
@@ -123,7 +114,7 @@ function resetPermissionPreflight() {
 
 function mobilePermissionPreflightMessage(prefs) {
   if (prefs.captureScreenshot) {
-    return "Chrome requires all-sites screenshot access to capture the temporary mobile clone tab. A11y Garden only uses it for local screenshot capture during this scan and does not edit any site.";
+    return "Chrome will ask for temporary read access to this site so the mobile clone can be scanned locally. Desktop screenshots stay local; mobile clone screenshots are omitted in v1 lean-permissions mode.";
   }
 
   return "Chrome will ask for temporary read access to this site so the mobile clone can be scanned locally. The wording says \"change,\" but A11y Garden does not edit the site.";
@@ -131,20 +122,14 @@ function mobilePermissionPreflightMessage(prefs) {
 
 function currentPrefs() {
   return normalizePrefs({
-    appOrigin: appOriginInput.value,
     captureScreenshot: captureScreenshotInput.checked,
     includeMobile: includeMobileInput.checked,
-    aiInsights: aiInsightsInput.checked,
-    acceptedAiTermsAt: acceptAiTermsInput.checked ? Date.now() : null,
   });
 }
 
 function setControlsFromPrefs(prefs) {
-  appOriginInput.value = prefs.appOrigin;
   captureScreenshotInput.checked = prefs.captureScreenshot;
   includeMobileInput.checked = prefs.includeMobile;
-  aiInsightsInput.checked = prefs.aiInsights;
-  acceptAiTermsInput.checked = Boolean(prefs.acceptedAiTermsAt);
 }
 
 function renderLastResult(result) {
@@ -190,11 +175,8 @@ async function loadPopupState() {
 }
 
 for (const control of [
-  appOriginInput,
   captureScreenshotInput,
   includeMobileInput,
-  aiInsightsInput,
-  acceptAiTermsInput,
 ]) {
   control.addEventListener("change", () => {
     resetPermissionPreflight();

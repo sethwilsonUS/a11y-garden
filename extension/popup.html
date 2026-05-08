@@ -33,7 +33,7 @@
             <input id="capture-screenshot" type="checkbox" />
             <span>
               <strong>Capture screenshot</strong>
-              <small>Stored locally with this result</small>
+              <small>Current tab only; stored locally with this result</small>
             </span>
           </label>
           <label class="toggle-option">
@@ -49,37 +49,6 @@
           Scan Current Tab
         </button>
         <p id="status" class="status" role="status" aria-live="polite"></p>
-      </section>
-
-      <section class="card" aria-labelledby="ai-settings-title">
-        <h2 id="ai-settings-title" class="section-title">AI Insights</h2>
-        <label class="toggle-option">
-          <input id="ai-insights" type="checkbox" />
-          <span>
-            <strong>Enable AI requests</strong>
-            <small>Requires sign-in on a11ygarden.org</small>
-          </span>
-        </label>
-
-        <label class="field">
-          <span class="label">A11y Garden account origin</span>
-          <input
-            id="app-origin"
-            type="url"
-            inputmode="url"
-            spellcheck="false"
-            placeholder="https://a11ygarden.org"
-          />
-        </label>
-
-        <label class="terms-option">
-          <input id="accept-ai-terms" type="checkbox" />
-          <span>
-            I understand AI insights send redacted findings to A11y Garden's
-            server and OpenAI. Selectors and rule metadata are included; HTML
-            snippets are not.
-          </span>
-        </label>
       </section>
 
       <section id="last-result-card" class="card result-card" hidden aria-labelledby="last-result-title">

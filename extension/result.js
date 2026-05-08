@@ -1,11 +1,6 @@
-/* global chrome */
-
-import { deleteAudit, getAudit, listAudits, updateAudit } from "./db.js";
+import { deleteAudit, getAudit, listAudits } from "./db.js";
 import {
-  DEFAULT_PREFS,
-  PREFS_KEY,
   buildAgentPlanMarkdown,
-  buildAiPayload,
   buildMarkdownReport,
   formatDateTime,
   formatEngineName,
@@ -17,7 +12,6 @@ import {
   getPrimarySelector,
   getReviewFindings,
   normalizeCounts,
-  normalizePrefs,
   parseEngineSummary,
   safeFilename,
   severityLabel,
@@ -46,29 +40,6 @@ function auditIdFromLocation() {
 
 function setHashAudit(id) {
   window.location.hash = id ? `audit=${encodeURIComponent(id)}` : "";
-}
-
-async function getPrefs() {
-  const result = await chrome.storage.local.get(PREFS_KEY);
-  return normalizePrefs(result[PREFS_KEY] ?? DEFAULT_PREFS);
-}
-
-async function getAuthState(prefs) {
-  try {
-    const response = await fetch(`${prefs.appOrigin}/api/extension/auth-status`, {
-      credentials: "include",
-      cache: "no-store",
-    });
-    if (!response.ok) return { signedIn: false };
-    const result = await response.json();
-    return { signedIn: result?.signedIn === true };
-  } catch {
-    return { signedIn: false };
-  }
-}
-
-async function savePrefs(prefs) {
-  await chrome.storage.local.set({ [PREFS_KEY]: normalizePrefs(prefs) });
 }
 
 function downloadBlob(blob, filename) {
@@ -378,54 +349,30 @@ function renderScan(audit, viewport) {
   `;
 }
 
-function renderAiPanel(audit, prefs) {
-  const aiEnabled = prefs.aiInsights && prefs.acceptedAiTermsAt;
-  const termsChecked = prefs.acceptedAiTermsAt ? "checked" : "";
-  const origin = prefs.appOrigin;
-
-  if (audit.aiSummary) {
-    return `
-      <section class="panel">
-        <h2>AI Insights</h2>
-        <p>${escapeHtml(audit.aiSummary)}</p>
-        ${
-          Array.isArray(audit.topIssues) && audit.topIssues.length
-            ? `<ol class="top-issues">${audit.topIssues.map((issue) => `<li>${escapeHtml(issue)}</li>`).join("")}</ol>`
-            : ""
-        }
-        ${audit.platformTip ? `<div class="ai-note">${escapeHtml(audit.platformTip)}</div>` : ""}
-        <p class="muted">Generated with ${escapeHtml(audit.aiModel || "OpenAI")} from redacted local findings.</p>
-      </section>
-    `;
-  }
-
+function renderAgentPanel() {
   return `
     <section class="panel">
-      <h2>AI Insights</h2>
-      <div class="ai-note">
-        AI is off by default. If you opt in, A11y Garden sends redacted rule metadata,
-        counts, and selectors to ${escapeHtml(origin)} for analysis. HTML snippets and
-        screenshots stay local.
+      <h2>Fix with an agent</h2>
+      <div class="agent-note">
+        Download the Markdown report or AGENTS.md file and place it in the project
+        you want to fix. Ask your coding agent to follow the report, prioritize
+        confirmed findings by severity, and manually verify needs-review signals.
       </div>
-      <label class="terms-row">
-        <input id="result-accept-ai" type="checkbox" ${termsChecked} />
-        <span>I accept the AI terms and understand redacted findings may be processed by A11y Garden and OpenAI.</span>
-      </label>
-      <div class="toolbar">
-        <button id="ai-generate" class="button" type="button" ${aiEnabled ? "" : "disabled"}>
-          Generate AI Insights
-        </button>
-        <button id="ai-sign-in" class="button secondary" type="button">Sign In</button>
-      </div>
-      <p id="ai-status" class="muted" role="status" aria-live="polite"></p>
+      <ol class="agent-steps">
+        <li>Start with critical and serious confirmed findings.</li>
+        <li>Use selectors as rendered DOM evidence, then fix the source component.</li>
+        <li>Keep native HTML when it solves the issue better than ARIA.</li>
+        <li>Rerun this extension scan and compare the new report.</li>
+      </ol>
+      <p class="prompt-box">
+        Follow the accessibility fix guidance in this report. Make the smallest durable
+        code changes, verify keyboard and screen reader behavior, and summarize what changed.
+      </p>
     </section>
   `;
 }
 
 async function renderResult(audit, activeViewport = "desktop") {
-  const prefs = await getPrefs();
-  const authState = await getAuthState(prefs);
-  const canExportAgents = authState.signedIn;
   const title = getAuditTitle(audit);
   const url = getAuditUrl(audit);
   const hasMobile = Boolean(audit.mobile);
@@ -447,11 +394,7 @@ async function renderResult(audit, activeViewport = "desktop") {
     <div class="toolbar">
       <button id="copy-report" class="button" type="button">Copy Report</button>
       <button id="download-report" class="button secondary" type="button">Download Markdown</button>
-      ${
-        canExportAgents
-          ? `<button id="download-agents" class="button secondary" type="button">Download AGENTS.md</button>`
-          : ""
-      }
+      <button id="download-agents" class="button secondary" type="button">Download AGENTS.md</button>
       <button id="download-zip" class="button secondary" type="button">Download ZIP</button>
       <button id="delete-audit" class="button danger" type="button">Delete Local Result</button>
     </div>
@@ -468,23 +411,23 @@ async function renderResult(audit, activeViewport = "desktop") {
         ${renderScan(audit, viewport)}
       </div>
       <aside class="stack side-stack">
-        ${renderAiPanel(audit, prefs)}
+        ${renderAgentPanel()}
         <section class="panel">
           <h2>Privacy</h2>
           <p class="muted">
             Core scan data, history, screenshots, and exports live in Chrome extension storage.
-            Nothing is uploaded unless you explicitly generate AI insights.
+            This v1 extension does not upload scan data or call A11y Garden servers.
           </p>
         </section>
       </aside>
     </div>
   `;
 
-  wireResultActions(audit, viewport, canExportAgents);
+  wireResultActions(audit, viewport);
   app.focus();
 }
 
-function wireResultActions(audit, viewport, canExportAgents) {
+function wireResultActions(audit, viewport) {
   const filenameBase = safeFilename(getHostLabel(getAuditUrl(audit)), "a11y-garden-report");
 
   document.getElementById("copy-report")?.addEventListener("click", async () => {
@@ -502,11 +445,9 @@ function wireResultActions(audit, viewport, canExportAgents) {
   document.getElementById("download-zip")?.addEventListener("click", () => {
     const files = {
       "a11y-report.md": strToU8(buildMarkdownReport(audit)),
+      "AGENTS.md": strToU8(buildAgentPlanMarkdown(audit)),
       "audit.json": strToU8(JSON.stringify(redactAuditForJson(audit), null, 2)),
     };
-    if (canExportAgents) {
-      files["AGENTS.md"] = strToU8(buildAgentPlanMarkdown(audit));
-    }
     if (audit.desktop?.screenshotDataUrl) {
       files["desktop-screenshot.jpg"] = dataUrlToBytes(audit.desktop.screenshotDataUrl);
     }
@@ -536,26 +477,6 @@ function wireResultActions(audit, viewport, canExportAgents) {
       target?.focus({ preventScroll: true });
     });
   }
-
-  document.getElementById("result-accept-ai")?.addEventListener("change", async (event) => {
-    const prefs = await getPrefs();
-    await savePrefs({
-      ...prefs,
-      aiInsights: event.currentTarget.checked,
-      acceptedAiTermsAt: event.currentTarget.checked ? Date.now() : null,
-    });
-    await renderResult(audit, viewport);
-  });
-
-  document.getElementById("ai-sign-in")?.addEventListener("click", async () => {
-    const prefs = await getPrefs();
-    const url = `${prefs.appOrigin}/extension/auth?from=extension`;
-    await chrome.tabs.create({ url });
-  });
-
-  document.getElementById("ai-generate")?.addEventListener("click", async () => {
-    await generateAiInsights(audit, viewport);
-  });
 }
 
 function redactAuditForJson(audit) {
@@ -568,51 +489,6 @@ function redactAuditForJson(audit) {
       ? { ...audit.mobile, screenshotDataUrl: audit.mobile.screenshotDataUrl ? "[stored in ZIP]" : undefined }
       : undefined,
   };
-}
-
-async function generateAiInsights(audit, viewport) {
-  const status = document.getElementById("ai-status");
-  const button = document.getElementById("ai-generate");
-  const prefs = await getPrefs();
-
-  if (!prefs.aiInsights || !prefs.acceptedAiTermsAt) {
-    if (status) status.textContent = "Accept the AI terms first.";
-    return;
-  }
-
-  if (status) status.textContent = "Generating AI insights...";
-  if (button) button.disabled = true;
-
-  try {
-    const response = await fetch(`${prefs.appOrigin}/api/extension/ai-summary`, {
-      method: "POST",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...buildAiPayload(audit), viewport }),
-    });
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new Error(result.error || `AI request failed with HTTP ${response.status}.`);
-    }
-
-    const updated = await updateAudit(audit.id, {
-      ...audit,
-      aiSummary: result.summary,
-      topIssues: Array.isArray(result.topIssues) ? result.topIssues : [],
-      platformTip: result.platformTip,
-      aiModel: result.model,
-      aiGeneratedAt: Date.now(),
-    });
-
-    await renderResult(updated, viewport);
-  } catch (error) {
-    if (status) {
-      status.textContent =
-        error instanceof Error ? error.message : "AI insights failed.";
-    }
-  } finally {
-    if (button) button.disabled = false;
-  }
 }
 
 async function renderHistory() {

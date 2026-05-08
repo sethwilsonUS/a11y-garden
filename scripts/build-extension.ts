@@ -22,6 +22,13 @@ const filesToCopy: Array<[string, string]> = [
   ["scan-main.js", "scan-main.js"],
 ];
 
+const iconFiles: Array<[string, string]> = [
+  ["icons/icon-16.png", "icons/icon-16.png"],
+  ["icons/icon-32.png", "icons/icon-32.png"],
+  ["icons/icon-48.png", "icons/icon-48.png"],
+  ["icons/icon-128.png", "icons/icon-128.png"],
+];
+
 const vendorFiles: Array<[string, string]> = [
   [resolve(root, "node_modules/axe-core/axe.min.js"), "axe.min.js"],
   [
@@ -34,8 +41,16 @@ const vendorFiles: Array<[string, string]> = [
 
 rmSync(distRoot, { recursive: true, force: true });
 mkdirSync(resolve(distRoot, "vendor"), { recursive: true });
+mkdirSync(resolve(distRoot, "icons"), { recursive: true });
 
 for (const [sourceName, destName] of filesToCopy) {
+  copyFileSync(
+    resolve(extensionRoot, sourceName),
+    resolve(distRoot, destName),
+  );
+}
+
+for (const [sourceName, destName] of iconFiles) {
   copyFileSync(
     resolve(extensionRoot, sourceName),
     resolve(distRoot, destName),

@@ -2,13 +2,11 @@
 
 import { saveAudit } from "./db.js";
 import {
-  ALL_URLS_PERMISSION,
   DEFAULT_PREFS,
   LAST_RESULT_KEY,
   PENDING_MOBILE_SCAN_KEY,
   PREFS_KEY,
   isScannableUrl,
-  mobileScanPermissionPattern,
   normalizePrefs,
   originPermissionPattern,
 } from "./shared.js";
@@ -78,6 +76,23 @@ async function blobToDataUrl(blob) {
   return `data:${blob.type || "image/jpeg"};base64,${btoa(binary)}`;
 }
 
+function dataUrlToBlob(dataUrl) {
+  const match = String(dataUrl || "").match(/^data:([^;,]+)?(;base64)?,(.*)$/);
+  if (!match) throw new Error("Invalid screenshot data URL.");
+
+  const type = match[1] || "image/jpeg";
+  const isBase64 = Boolean(match[2]);
+  const payload = match[3] || "";
+  const binary = isBase64 ? atob(payload) : decodeURIComponent(payload);
+  const bytes = new Uint8Array(binary.length);
+
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+
+  return new Blob([bytes], { type });
+}
+
 async function resizeScreenshotDataUrl(dataUrl, label) {
   const limits = screenshotLimitsForLabel(label);
 
@@ -91,7 +106,7 @@ async function resizeScreenshotDataUrl(dataUrl, label) {
 
   let bitmap;
   try {
-    const imageBlob = await fetch(dataUrl).then((response) => response.blob());
+    const imageBlob = dataUrlToBlob(dataUrl);
     bitmap = await createImageBitmap(imageBlob);
     const scale = Math.min(1, limits.maxWidth / bitmap.width, limits.maxHeight / bitmap.height);
 
@@ -266,29 +281,12 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function focusTabForCapture(tabId, windowId) {
-  try {
-    await chromeCall((done) => chrome.tabs.update(tabId, { active: true }, done));
-    await chromeCall((done) => chrome.windows.update(windowId, { focused: true }, done));
-    await delay(350);
-  } catch (error) {
-    console.warn("[A11y Garden] Could not focus tab before screenshot:", error);
-  }
-}
-
 async function hasOriginPermission(url) {
   const origins = [originPermissionPattern(url)];
-  if (await chrome.permissions.contains({ origins })) return true;
-  return await hasAllUrlsPermission();
+  return await chrome.permissions.contains({ origins });
 }
 
-async function hasAllUrlsPermission() {
-  return await chrome.permissions.contains({ origins: [ALL_URLS_PERMISSION] });
-}
-
-async function hasMobileScanPermission(url, prefs) {
-  const origin = mobileScanPermissionPattern(prefs, url);
-  if (origin === ALL_URLS_PERMISSION) return await hasAllUrlsPermission();
+async function hasMobileScanPermission(url) {
   return await hasOriginPermission(url);
 }
 
@@ -316,7 +314,7 @@ function waitForTabComplete(tabId, timeoutMs = 20_000) {
 }
 
 async function scanMobileClone(sourceTab, prefs) {
-  const allowed = await hasMobileScanPermission(sourceTab.url, prefs);
+  const allowed = await hasMobileScanPermission(sourceTab.url);
   if (!allowed) {
     throw new Error(
       "Mobile clone scanning needs temporary site access. Start the scan from the popup and approve access for this site.",
@@ -337,19 +335,16 @@ async function scanMobileClone(sourceTab, prefs) {
     await waitForTabComplete(mobileTab.id);
     await delay(750);
     const scan = await executeScanner(mobileTab.id, COMPREHENSIVE_SCAN_MODE);
-    if (prefs.captureScreenshot) {
-      await focusTabForCapture(mobileTab.id, createdWindow.id);
-    }
-    const latestMobileTab = (await getTabById(mobileTab.id)) || mobileTab;
-    const screenshot = prefs.captureScreenshot
-      ? await captureTabScreenshot({ ...latestMobileTab, windowId: createdWindow.id }, "mobile")
-      : null;
     return {
       ...scan,
       viewportWidth: scan.viewportWidth || MOBILE_SCAN_VIEWPORT.width,
       viewportHeight: scan.viewportHeight || MOBILE_SCAN_VIEWPORT.height,
-      ...(screenshot?.dataUrl ? { screenshotDataUrl: screenshot.dataUrl } : {}),
-      ...(screenshot?.warning ? { screenshotWarning: screenshot.warning } : {}),
+      ...(prefs.captureScreenshot
+        ? {
+            screenshotWarning:
+              "Mobile clone screenshots are omitted in the v1 lean-permissions mode. Desktop screenshots are still captured locally.",
+          }
+        : {}),
     };
   } finally {
     if (createdWindow?.id) {
@@ -374,8 +369,6 @@ function buildAuditRecord({ id, sourceTab, desktopScan, mobileScan, prefs }) {
       mode: COMPREHENSIVE_SCAN_MODE,
       captureScreenshot: prefs.captureScreenshot,
       includeMobile: prefs.includeMobile,
-      aiInsights: prefs.aiInsights,
-      appOrigin: prefs.appOrigin,
     },
     desktop: desktopScan,
     ...(mobileScan ? { mobile: mobileScan } : {}),
@@ -438,7 +431,7 @@ async function startPendingMobileScan(allowedOrigins = null) {
     const pending = await claimPendingMobileScan(allowedOrigins);
     if (!pending) return null;
 
-    const allowed = await hasMobileScanPermission(pending.sourceTabUrl, pending.prefs);
+    const allowed = await hasMobileScanPermission(pending.sourceTabUrl);
     if (!allowed) {
       throw new Error(
         "Mobile clone scanning needs temporary site access. Start the scan from the popup and approve access for this site.",
@@ -473,7 +466,7 @@ async function runScan(input = {}, options = {}) {
 
   await savePrefs(prefs);
   if (prefs.includeMobile) {
-    const allowed = await hasMobileScanPermission(tab.url, prefs);
+    const allowed = await hasMobileScanPermission(tab.url);
     if (!allowed) {
       throw new Error(
         "Mobile clone scanning needs temporary site access. Start the scan from the popup and approve access for this site.",

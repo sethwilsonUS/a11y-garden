@@ -17,6 +17,7 @@
     "browserless:stop": "docker stop a11y-garden-browserless",
     "build": "sh ./scripts/build.sh",
     "build:extension": "node --import tsx scripts/build-extension.ts",
+    "package:extension": "npm run build:extension && node --import tsx scripts/package-extension.ts",
     "start": "next start",
     "lint": "eslint",
     "local": "NEXT_PUBLIC_LOCAL_MODE=true next dev",
